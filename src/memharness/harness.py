@@ -1,0 +1,2150 @@
+# memharness - Framework-agnostic memory infrastructure for AI agents
+# Copyright (c) 2026 Ayush Sonuu
+# Licensed under MIT License
+
+"""
+Main MemoryHarness class - the primary entry point for memharness.
+
+This module provides the MemoryHarness class which serves as the main interface
+for all memory operations. Users interact with this class to store, retrieve,
+search, and manage memories across different memory types and backends.
+
+Example:
+    async with MemoryHarness("sqlite:///memory.db") as harness:
+        await harness.add_conversational("thread1", "user", "Hello!")
+        messages = await harness.get_conversational("thread1")
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+import json
+import re
+from datetime import datetime, timezone
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    Union,
+    runtime_checkable,
+)
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+
+
+# =============================================================================
+# Type Definitions
+# =============================================================================
+
+class MemoryType(str, Enum):
+    """Enumeration of all supported memory types."""
+
+    CONVERSATIONAL = "conversational"
+    KNOWLEDGE = "knowledge"
+    ENTITY = "entity"
+    WORKFLOW = "workflow"
+    TOOLBOX = "toolbox"
+    SUMMARY = "summary"
+    TOOL_LOG = "tool_log"
+    SKILLS = "skills"
+    FILE = "file"
+    PERSONA = "persona"
+
+
+@dataclass
+class MemoryUnit:
+    """
+    A single unit of memory stored in the harness.
+
+    This is the fundamental data structure representing any piece of memory,
+    regardless of its type. Each MemoryUnit has a unique ID, content, type,
+    and associated metadata.
+
+    Attributes:
+        id: Unique identifier for this memory unit.
+        content: The actual content/text of the memory.
+        memory_type: The type of memory (e.g., conversational, knowledge).
+        namespace: Hierarchical namespace tuple for organization.
+        embedding: Optional vector embedding for similarity search.
+        metadata: Additional key-value metadata.
+        created_at: Timestamp when the memory was created.
+        updated_at: Timestamp when the memory was last updated.
+    """
+
+    id: str
+    content: str
+    memory_type: MemoryType
+    namespace: tuple[str, ...] = field(default_factory=tuple)
+    embedding: Optional[list[float]] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the MemoryUnit to a dictionary."""
+        return {
+            "id": self.id,
+            "content": self.content,
+            "memory_type": self.memory_type.value,
+            "namespace": list(self.namespace),
+            "embedding": self.embedding,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MemoryUnit:
+        """Create a MemoryUnit from a dictionary."""
+        return cls(
+            id=data["id"],
+            content=data["content"],
+            memory_type=MemoryType(data["memory_type"]),
+            namespace=tuple(data.get("namespace", [])),
+            embedding=data.get("embedding"),
+            metadata=data.get("metadata", {}),
+            created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now(timezone.utc)),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if isinstance(data.get("updated_at"), str) else data.get("updated_at", datetime.now(timezone.utc)),
+        )
+
+
+@dataclass
+class MemharnessConfig:
+    """
+    Configuration for the MemoryHarness.
+
+    Attributes:
+        default_embedding_model: Name of the default embedding model to use.
+        default_k: Default number of results for search operations.
+        max_context_tokens: Maximum tokens for context assembly.
+        enable_ai_agents: Whether to enable embedded AI agents.
+        toolbox_vfs_enabled: Whether to enable virtual filesystem for toolbox.
+        persona_max_blocks: Maximum number of persona blocks.
+        summary_expansion_depth: How deep to expand summaries.
+    """
+
+    default_embedding_model: str = "text-embedding-3-small"
+    default_k: int = 10
+    max_context_tokens: int = 4000
+    enable_ai_agents: bool = True
+    toolbox_vfs_enabled: bool = True
+    persona_max_blocks: int = 10
+    summary_expansion_depth: int = 2
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MemharnessConfig:
+        """Create config from a dictionary."""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    @classmethod
+    def from_file(cls, path: str) -> MemharnessConfig:
+        """Load config from a JSON or YAML file."""
+        file_path = Path(path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        content = file_path.read_text()
+
+        if file_path.suffix in (".yaml", ".yml"):
+            try:
+                import yaml
+                data = yaml.safe_load(content)
+            except ImportError:
+                raise ImportError("PyYAML is required to load YAML config files. Install with: pip install pyyaml")
+        else:
+            data = json.loads(content)
+
+        return cls.from_dict(data)
+
+
+@runtime_checkable
+class BackendProtocol(Protocol):
+    """
+    Protocol defining the interface that all backends must implement.
+
+    Backends are responsible for the actual storage and retrieval of memory units.
+    They handle persistence, indexing, and search operations.
+    """
+
+    async def connect(self) -> None:
+        """Establish connection to the backend storage."""
+        ...
+
+    async def disconnect(self) -> None:
+        """Close connection to the backend storage."""
+        ...
+
+    async def store(self, unit: MemoryUnit) -> str:
+        """Store a memory unit and return its ID."""
+        ...
+
+    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+        """Retrieve a memory unit by ID."""
+        ...
+
+    async def search(
+        self,
+        query_embedding: list[float],
+        memory_type: Optional[MemoryType] = None,
+        namespace: Optional[tuple[str, ...]] = None,
+        filters: Optional[dict[str, Any]] = None,
+        k: int = 10,
+    ) -> list[MemoryUnit]:
+        """Search for memory units by similarity."""
+        ...
+
+    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
+        """Update a memory unit."""
+        ...
+
+    async def delete(self, memory_id: str) -> bool:
+        """Delete a memory unit."""
+        ...
+
+    async def list_by_namespace(
+        self,
+        namespace: tuple[str, ...],
+        memory_type: Optional[MemoryType] = None,
+        limit: int = 100,
+    ) -> list[MemoryUnit]:
+        """List memory units by namespace prefix."""
+        ...
+
+
+# =============================================================================
+# In-Memory Backend Implementation
+# =============================================================================
+
+class InMemoryBackend:
+    """
+    Simple in-memory backend for development and testing.
+
+    This backend stores all data in memory and is lost when the process ends.
+    It provides basic similarity search using cosine similarity.
+    """
+
+    def __init__(self) -> None:
+        self._storage: dict[str, MemoryUnit] = {}
+        self._connected: bool = False
+
+    async def connect(self) -> None:
+        """Mark the backend as connected."""
+        self._connected = True
+
+    async def disconnect(self) -> None:
+        """Mark the backend as disconnected."""
+        self._connected = False
+
+    async def store(self, unit: MemoryUnit) -> str:
+        """Store a memory unit in memory."""
+        self._storage[unit.id] = unit
+        return unit.id
+
+    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+        """Retrieve a memory unit by ID."""
+        return self._storage.get(memory_id)
+
+    async def search(
+        self,
+        query_embedding: list[float],
+        memory_type: Optional[MemoryType] = None,
+        namespace: Optional[tuple[str, ...]] = None,
+        filters: Optional[dict[str, Any]] = None,
+        k: int = 10,
+    ) -> list[MemoryUnit]:
+        """Search for memory units using cosine similarity."""
+        candidates = []
+
+        for unit in self._storage.values():
+            # Filter by memory type
+            if memory_type and unit.memory_type != memory_type:
+                continue
+
+            # Filter by namespace prefix
+            if namespace and not self._namespace_matches(unit.namespace, namespace):
+                continue
+
+            # Apply metadata filters
+            if filters and not self._matches_filters(unit.metadata, filters):
+                continue
+
+            # Calculate similarity if embeddings exist
+            if unit.embedding and query_embedding:
+                similarity = self._cosine_similarity(query_embedding, unit.embedding)
+                candidates.append((similarity, unit))
+            else:
+                # No embedding, use 0 similarity but still include
+                candidates.append((0.0, unit))
+
+        # Sort by similarity descending and return top k
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return [unit for _, unit in candidates[:k]]
+
+    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
+        """Update a memory unit."""
+        if memory_id not in self._storage:
+            return False
+
+        unit = self._storage[memory_id]
+
+        if "content" in updates:
+            unit.content = updates["content"]
+        if "metadata" in updates:
+            unit.metadata.update(updates["metadata"])
+        if "embedding" in updates:
+            unit.embedding = updates["embedding"]
+
+        unit.updated_at = datetime.now(timezone.utc)
+        return True
+
+    async def delete(self, memory_id: str) -> bool:
+        """Delete a memory unit."""
+        if memory_id in self._storage:
+            del self._storage[memory_id]
+            return True
+        return False
+
+    async def list_by_namespace(
+        self,
+        namespace: tuple[str, ...],
+        memory_type: Optional[MemoryType] = None,
+        limit: int = 100,
+    ) -> list[MemoryUnit]:
+        """List memory units by namespace prefix."""
+        results = []
+
+        for unit in self._storage.values():
+            if not self._namespace_matches(unit.namespace, namespace):
+                continue
+            if memory_type and unit.memory_type != memory_type:
+                continue
+            results.append(unit)
+            if len(results) >= limit:
+                break
+
+        # Sort by created_at descending
+        results.sort(key=lambda u: u.created_at, reverse=True)
+        return results[:limit]
+
+    def _namespace_matches(self, unit_ns: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+        """Check if a namespace starts with the given prefix."""
+        if len(prefix) > len(unit_ns):
+            return False
+        return unit_ns[:len(prefix)] == prefix
+
+    def _matches_filters(self, metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
+        """Check if metadata matches all filters."""
+        for key, value in filters.items():
+            if key not in metadata:
+                return False
+            if metadata[key] != value:
+                return False
+        return True
+
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        """Calculate cosine similarity between two vectors."""
+        if len(a) != len(b):
+            return 0.0
+
+        dot_product = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+
+        return dot_product / (norm_a * norm_b)
+
+
+# =============================================================================
+# Backend Factory
+# =============================================================================
+
+def _parse_backend(backend_uri: str) -> BackendProtocol:
+    """
+    Parse a backend URI and return the appropriate backend instance.
+
+    Supported URIs:
+        - "memory://" -> InMemoryBackend
+        - "sqlite:///path/to/db.sqlite" -> SqliteBackend
+        - "postgresql://user:pass@host:port/db" -> PostgresBackend
+
+    Args:
+        backend_uri: The backend connection string.
+
+    Returns:
+        An instance of the appropriate backend.
+
+    Raises:
+        ValueError: If the backend URI format is not recognized.
+        ImportError: If required backend dependencies are not installed.
+    """
+    if backend_uri == "memory://" or backend_uri.startswith("memory://"):
+        return InMemoryBackend()
+
+    if backend_uri.startswith("sqlite:///"):
+        # Extract path from sqlite:///path/to/db.sqlite
+        db_path = backend_uri[10:]  # Remove "sqlite:///"
+        try:
+            from memharness.backends.sqlite import SqliteBackend
+            return SqliteBackend(db_path)
+        except ImportError:
+            raise ImportError(
+                "SqliteBackend is not available. "
+                "Ensure the sqlite backend module is installed."
+            )
+
+    if backend_uri.startswith("postgresql://") or backend_uri.startswith("postgres://"):
+        try:
+            from memharness.backends.postgres import PostgresBackend
+            return PostgresBackend(backend_uri)
+        except ImportError:
+            raise ImportError(
+                "PostgresBackend is not available. "
+                "Install with: pip install memharness[postgres]"
+            )
+
+    raise ValueError(
+        f"Unrecognized backend URI: {backend_uri}. "
+        "Supported formats: memory://, sqlite:///path, postgresql://..."
+    )
+
+
+# =============================================================================
+# Default Embedding Function
+# =============================================================================
+
+def _default_embedding_fn(text: str) -> list[float]:
+    """
+    Default embedding function that returns a simple hash-based embedding.
+
+    This is a placeholder that should be replaced with a real embedding
+    model in production. It generates a deterministic but low-quality
+    embedding based on character hashing.
+
+    Args:
+        text: The text to embed.
+
+    Returns:
+        A 384-dimensional embedding vector.
+    """
+    # Simple hash-based embedding for development/testing
+    # In production, this should be replaced with a real model
+    import hashlib
+
+    dimension = 384
+    embedding = [0.0] * dimension
+
+    # Hash the text and use it to seed pseudo-random values
+    text_bytes = text.encode("utf-8")
+    hash_bytes = hashlib.sha256(text_bytes).digest()
+
+    # Generate embedding values from hash
+    for i in range(dimension):
+        byte_idx = i % len(hash_bytes)
+        embedding[i] = (hash_bytes[byte_idx] - 128) / 128.0
+
+    # Normalize the embedding
+    norm = sum(x * x for x in embedding) ** 0.5
+    if norm > 0:
+        embedding = [x / norm for x in embedding]
+
+    return embedding
+
+
+# =============================================================================
+# Main Harness Class
+# =============================================================================
+
+class MemoryHarness:
+    """
+    The main entry point for memharness - a framework-agnostic memory layer for AI agents.
+
+    MemoryHarness provides a unified interface for storing, retrieving, and searching
+    memories across 10 different memory types. It supports multiple backends (PostgreSQL,
+    SQLite, in-memory) and can be configured for various use cases.
+
+    Memory Types:
+        - Conversational: Chat history and dialogue
+        - Knowledge: Facts and information
+        - Entity: Named entities and relationships
+        - Workflow: Task procedures and outcomes
+        - Toolbox: Tool definitions with VFS interface
+        - Summary: Compressed summaries with expansion
+        - Tool Log: Tool execution history
+        - Skills: Learned capabilities
+        - File: File metadata and content summaries
+        - Persona: User/agent persona blocks
+
+    Example:
+        ```python
+        async with MemoryHarness("sqlite:///memory.db") as harness:
+            # Add a conversation message
+            await harness.add_conversational("thread1", "user", "Hello!")
+
+            # Search knowledge base
+            results = await harness.search_knowledge("Python async programming")
+
+            # Assemble context for an agent
+            context = await harness.assemble_context("Help with async", "thread1")
+        ```
+
+    Attributes:
+        backend: The storage backend instance.
+        config: Configuration settings.
+        embedding_fn: Function to generate embeddings from text.
+        namespace_prefix: Optional namespace prefix for all operations.
+    """
+
+    def __init__(
+        self,
+        backend: Union[str, BackendProtocol] = "memory://",
+        embedding_fn: Optional[Callable[[str], list[float]]] = None,
+        config: Optional[MemharnessConfig] = None,
+        namespace_prefix: Optional[tuple[str, ...]] = None,
+    ) -> None:
+        """
+        Initialize a MemoryHarness instance.
+
+        Args:
+            backend: Either a connection string (e.g., "memory://", "sqlite:///db.sqlite",
+                    "postgresql://...") or a BackendProtocol instance.
+            embedding_fn: Optional function to generate embeddings. If not provided,
+                         a simple hash-based function is used (not recommended for production).
+            config: Optional configuration. Uses defaults if not provided.
+            namespace_prefix: Optional namespace prefix applied to all operations.
+        """
+        # Parse backend string or use provided instance
+        if isinstance(backend, str):
+            self._backend: BackendProtocol = _parse_backend(backend)
+        else:
+            self._backend = backend
+
+        self._embedding_fn = embedding_fn or _default_embedding_fn
+        self._config = config or MemharnessConfig()
+        self._namespace_prefix = namespace_prefix or ()
+        self._connected = False
+
+        # Toolbox VFS cache for tree/ls operations
+        self._toolbox_cache: dict[str, dict[str, Any]] = {}
+
+    @classmethod
+    def from_config(cls, path: str) -> MemoryHarness:
+        """
+        Create a MemoryHarness from a configuration file.
+
+        Args:
+            path: Path to a JSON or YAML configuration file.
+
+        Returns:
+            A configured MemoryHarness instance.
+
+        Example:
+            ```python
+            harness = MemoryHarness.from_config("config/memharness.yaml")
+            ```
+        """
+        file_path = Path(path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        content = file_path.read_text()
+
+        if file_path.suffix in (".yaml", ".yml"):
+            try:
+                import yaml
+                data = yaml.safe_load(content)
+            except ImportError:
+                raise ImportError("PyYAML required for YAML configs: pip install pyyaml")
+        else:
+            data = json.loads(content)
+
+        backend = data.get("backend", "memory://")
+        config = MemharnessConfig.from_dict(data.get("config", {}))
+        namespace_prefix = tuple(data.get("namespace_prefix", []))
+
+        return cls(
+            backend=backend,
+            config=config,
+            namespace_prefix=namespace_prefix if namespace_prefix else None,
+        )
+
+    @classmethod
+    def from_env(cls) -> MemoryHarness:
+        """
+        Create a MemoryHarness from environment variables.
+
+        Environment Variables:
+            MEMHARNESS_BACKEND: Backend connection string (default: "memory://")
+            MEMHARNESS_CONFIG_PATH: Path to config file (optional)
+            MEMHARNESS_NAMESPACE: Comma-separated namespace prefix (optional)
+
+        Returns:
+            A configured MemoryHarness instance.
+
+        Example:
+            ```python
+            # With MEMHARNESS_BACKEND=postgresql://localhost/memory
+            harness = MemoryHarness.from_env()
+            ```
+        """
+        # Check for config file first
+        config_path = os.environ.get("MEMHARNESS_CONFIG_PATH")
+        if config_path and Path(config_path).exists():
+            return cls.from_config(config_path)
+
+        backend = os.environ.get("MEMHARNESS_BACKEND", "memory://")
+        namespace_str = os.environ.get("MEMHARNESS_NAMESPACE", "")
+        namespace_prefix = tuple(namespace_str.split(",")) if namespace_str else None
+
+        return cls(
+            backend=backend,
+            namespace_prefix=namespace_prefix,
+        )
+
+    # =========================================================================
+    # Lifecycle Methods
+    # =========================================================================
+
+    async def connect(self) -> None:
+        """
+        Establish connection to the backend.
+
+        This method should be called before performing any operations,
+        unless using the async context manager.
+        """
+        await self._backend.connect()
+        self._connected = True
+
+    async def disconnect(self) -> None:
+        """
+        Close connection to the backend.
+
+        This method should be called when done with the harness,
+        unless using the async context manager.
+        """
+        await self._backend.disconnect()
+        self._connected = False
+
+    async def __aenter__(self) -> MemoryHarness:
+        """Async context manager entry - connects to backend."""
+        await self.connect()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any],
+    ) -> None:
+        """Async context manager exit - disconnects from backend."""
+        await self.disconnect()
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def _generate_id(self) -> str:
+        """Generate a unique memory ID."""
+        return str(uuid.uuid4())
+
+    def _build_namespace(
+        self,
+        memory_type: MemoryType,
+        *parts: str,
+    ) -> tuple[str, ...]:
+        """Build a full namespace including the prefix."""
+        return self._namespace_prefix + (memory_type.value,) + parts
+
+    async def _embed(self, text: str) -> list[float]:
+        """Generate an embedding for the given text."""
+        return self._embedding_fn(text)
+
+    def _create_unit(
+        self,
+        content: str,
+        memory_type: MemoryType,
+        namespace: tuple[str, ...],
+        metadata: Optional[dict[str, Any]] = None,
+        embedding: Optional[list[float]] = None,
+    ) -> MemoryUnit:
+        """Create a new MemoryUnit with generated ID and timestamps."""
+        now = datetime.now(timezone.utc)
+        return MemoryUnit(
+            id=self._generate_id(),
+            content=content,
+            memory_type=memory_type,
+            namespace=namespace,
+            embedding=embedding,
+            metadata=metadata or {},
+            created_at=now,
+            updated_at=now,
+        )
+
+    # =========================================================================
+    # Conversational Memory
+    # =========================================================================
+
+    async def add_conversational(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """
+        Add a conversational message to memory.
+
+        Args:
+            thread_id: Unique identifier for the conversation thread.
+            role: The role of the speaker (e.g., "user", "assistant", "system").
+            content: The message content.
+            metadata: Optional additional metadata (e.g., timestamp, tool_calls).
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            msg_id = await harness.add_conversational(
+                thread_id="chat-123",
+                role="user",
+                content="What's the weather like?",
+                metadata={"timestamp": "2024-01-01T12:00:00Z"}
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.CONVERSATIONAL, thread_id)
+        embedding = await self._embed(content)
+
+        meta = metadata or {}
+        meta["role"] = role
+        meta["thread_id"] = thread_id
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.CONVERSATIONAL,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def get_conversational(
+        self,
+        thread_id: str,
+        limit: int = 50,
+    ) -> list[MemoryUnit]:
+        """
+        Retrieve conversation history for a thread.
+
+        Args:
+            thread_id: The conversation thread ID.
+            limit: Maximum number of messages to retrieve.
+
+        Returns:
+            List of MemoryUnit objects representing the conversation,
+            ordered from oldest to newest.
+
+        Example:
+            ```python
+            messages = await harness.get_conversational("chat-123", limit=10)
+            for msg in messages:
+                print(f"{msg.metadata['role']}: {msg.content}")
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.CONVERSATIONAL, thread_id)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.CONVERSATIONAL,
+            limit=limit,
+        )
+        # Sort by created_at ascending (oldest first)
+        results.sort(key=lambda u: u.created_at)
+        return results
+
+    # =========================================================================
+    # Knowledge Base Memory
+    # =========================================================================
+
+    async def add_knowledge(
+        self,
+        content: str,
+        source: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """
+        Add knowledge to the knowledge base.
+
+        Args:
+            content: The knowledge content (fact, information, etc.).
+            source: Optional source of the knowledge (URL, document name, etc.).
+            metadata: Optional additional metadata.
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            kb_id = await harness.add_knowledge(
+                content="Python's GIL prevents true parallelism in CPU-bound threads.",
+                source="Python Documentation",
+                metadata={"category": "programming", "language": "python"}
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.KNOWLEDGE)
+        embedding = await self._embed(content)
+
+        meta = metadata or {}
+        if source:
+            meta["source"] = source
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.KNOWLEDGE,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_knowledge(
+        self,
+        query: str,
+        k: int = 5,
+        filters: Optional[dict[str, Any]] = None,
+    ) -> list[MemoryUnit]:
+        """
+        Search the knowledge base by semantic similarity.
+
+        Args:
+            query: The search query.
+            k: Number of results to return.
+            filters: Optional metadata filters.
+
+        Returns:
+            List of matching MemoryUnit objects, ordered by relevance.
+
+        Example:
+            ```python
+            results = await harness.search_knowledge(
+                query="Python concurrency",
+                k=3,
+                filters={"category": "programming"}
+            )
+            ```
+        """
+        query_embedding = await self._embed(query)
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=MemoryType.KNOWLEDGE,
+            namespace=self._namespace_prefix + (MemoryType.KNOWLEDGE.value,) if self._namespace_prefix else None,
+            filters=filters,
+            k=k,
+        )
+
+    # =========================================================================
+    # Entity Memory
+    # =========================================================================
+
+    async def add_entity(
+        self,
+        name: str,
+        entity_type: str,
+        description: str,
+        relationships: Optional[list[dict[str, str]]] = None,
+    ) -> str:
+        """
+        Add an entity to memory.
+
+        Args:
+            name: The entity name (e.g., "John Smith", "OpenAI").
+            entity_type: Type of entity (e.g., "person", "organization", "location").
+            description: Description of the entity.
+            relationships: Optional list of relationships, each as a dict with
+                          "target" (entity name), "type" (relationship type).
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            entity_id = await harness.add_entity(
+                name="Anthropic",
+                entity_type="organization",
+                description="AI safety company that created Claude",
+                relationships=[
+                    {"target": "Claude", "type": "created"},
+                    {"target": "San Francisco", "type": "headquartered_in"}
+                ]
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.ENTITY, entity_type)
+
+        # Create searchable content
+        content = f"{name}: {description}"
+        embedding = await self._embed(content)
+
+        meta = {
+            "name": name,
+            "entity_type": entity_type,
+            "relationships": relationships or [],
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.ENTITY,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_entity(
+        self,
+        query: str,
+        entity_type: Optional[str] = None,
+        k: int = 5,
+    ) -> list[MemoryUnit]:
+        """
+        Search for entities by semantic similarity.
+
+        Args:
+            query: The search query.
+            entity_type: Optional filter by entity type.
+            k: Number of results to return.
+
+        Returns:
+            List of matching entity MemoryUnit objects.
+
+        Example:
+            ```python
+            people = await harness.search_entity(
+                query="AI researcher",
+                entity_type="person",
+                k=5
+            )
+            ```
+        """
+        query_embedding = await self._embed(query)
+
+        filters = {}
+        if entity_type:
+            filters["entity_type"] = entity_type
+
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=MemoryType.ENTITY,
+            filters=filters if filters else None,
+            k=k,
+        )
+
+    # =========================================================================
+    # Workflow Memory
+    # =========================================================================
+
+    async def add_workflow(
+        self,
+        task: str,
+        steps: list[str],
+        outcome: str,
+        result: Optional[str] = None,
+    ) -> str:
+        """
+        Add a workflow/procedure to memory.
+
+        Args:
+            task: Description of the task this workflow accomplishes.
+            steps: List of steps to complete the task.
+            outcome: Expected outcome of the workflow.
+            result: Optional actual result after execution.
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            wf_id = await harness.add_workflow(
+                task="Deploy application to production",
+                steps=["Run tests", "Build Docker image", "Push to registry", "Update k8s"],
+                outcome="Application deployed and healthy",
+                result="Deployed v2.1.0 successfully"
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.WORKFLOW)
+
+        # Create searchable content
+        steps_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+        content = f"Task: {task}\nSteps:\n{steps_text}\nOutcome: {outcome}"
+        if result:
+            content += f"\nResult: {result}"
+
+        embedding = await self._embed(content)
+
+        meta = {
+            "task": task,
+            "steps": steps,
+            "outcome": outcome,
+            "result": result,
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.WORKFLOW,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_workflow(
+        self,
+        query: str,
+        k: int = 3,
+    ) -> list[MemoryUnit]:
+        """
+        Search for workflows by semantic similarity.
+
+        Args:
+            query: The search query (task description, keywords, etc.).
+            k: Number of results to return.
+
+        Returns:
+            List of matching workflow MemoryUnit objects.
+
+        Example:
+            ```python
+            workflows = await harness.search_workflow("deploy application", k=3)
+            for wf in workflows:
+                print(f"Task: {wf.metadata['task']}")
+            ```
+        """
+        query_embedding = await self._embed(query)
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=MemoryType.WORKFLOW,
+            k=k,
+        )
+
+    # =========================================================================
+    # Toolbox Memory (with VFS)
+    # =========================================================================
+
+    async def add_tool(
+        self,
+        server: str,
+        tool_name: str,
+        description: str,
+        parameters: dict[str, Any],
+    ) -> str:
+        """
+        Add a tool definition to the toolbox.
+
+        Args:
+            server: The server/namespace the tool belongs to (e.g., "github", "slack").
+            tool_name: Name of the tool.
+            description: Description of what the tool does.
+            parameters: JSON Schema of the tool's parameters.
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            tool_id = await harness.add_tool(
+                server="github",
+                tool_name="create_issue",
+                description="Create a new GitHub issue",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["title"]
+                }
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOLBOX, server)
+
+        content = f"{server}/{tool_name}: {description}"
+        embedding = await self._embed(content)
+
+        meta = {
+            "server": server,
+            "tool_name": tool_name,
+            "description": description,
+            "parameters": parameters,
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.TOOLBOX,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        result = await self._backend.store(unit)
+
+        # Update VFS cache
+        if server not in self._toolbox_cache:
+            self._toolbox_cache[server] = {}
+        self._toolbox_cache[server][tool_name] = {
+            "id": result,
+            "description": description,
+            "parameters": parameters,
+        }
+
+        return result
+
+    async def toolbox_tree(self, path: str = "/") -> str:
+        """
+        Get a tree view of the toolbox virtual filesystem.
+
+        Args:
+            path: The path to start from (default "/" for root).
+
+        Returns:
+            A tree-formatted string showing the toolbox structure.
+
+        Example:
+            ```python
+            tree = await harness.toolbox_tree("/")
+            print(tree)
+            # /
+            # ├── github/
+            # │   ├── create_issue
+            # │   └── list_prs
+            # └── slack/
+            #     └── send_message
+            ```
+        """
+        # Build tree from all toolbox entries
+        tools = await self._backend.list_by_namespace(
+            namespace=self._namespace_prefix + (MemoryType.TOOLBOX.value,),
+            memory_type=MemoryType.TOOLBOX,
+            limit=1000,
+        )
+
+        # Organize by server
+        servers: dict[str, list[str]] = {}
+        for tool in tools:
+            server = tool.metadata.get("server", "unknown")
+            tool_name = tool.metadata.get("tool_name", "unknown")
+            if server not in servers:
+                servers[server] = []
+            servers[server].append(tool_name)
+
+        # Build tree string
+        lines = [path]
+        server_list = sorted(servers.keys())
+
+        for i, server in enumerate(server_list):
+            is_last_server = i == len(server_list) - 1
+            prefix = "└── " if is_last_server else "├── "
+            lines.append(f"{prefix}{server}/")
+
+            tool_list = sorted(servers[server])
+            for j, tool_name in enumerate(tool_list):
+                is_last_tool = j == len(tool_list) - 1
+                child_prefix = "    " if is_last_server else "│   "
+                tool_prefix = "└── " if is_last_tool else "├── "
+                lines.append(f"{child_prefix}{tool_prefix}{tool_name}")
+
+        return "\n".join(lines)
+
+    async def toolbox_ls(self, server: str) -> list[str]:
+        """
+        List all tools in a server/namespace.
+
+        Args:
+            server: The server name to list tools from.
+
+        Returns:
+            List of tool names in the server.
+
+        Example:
+            ```python
+            tools = await harness.toolbox_ls("github")
+            # ["create_issue", "list_prs", "create_pr"]
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOLBOX, server)
+        tools = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.TOOLBOX,
+            limit=1000,
+        )
+        return [t.metadata.get("tool_name", "") for t in tools if t.metadata.get("tool_name")]
+
+    async def toolbox_grep(self, pattern: str) -> list[dict[str, Any]]:
+        """
+        Search for tools matching a pattern.
+
+        Args:
+            pattern: Regex pattern to match against tool names and descriptions.
+
+        Returns:
+            List of matching tool info dicts with server, name, and description.
+
+        Example:
+            ```python
+            matches = await harness.toolbox_grep("create.*")
+            # [{"server": "github", "name": "create_issue", "description": "..."}]
+            ```
+        """
+        tools = await self._backend.list_by_namespace(
+            namespace=self._namespace_prefix + (MemoryType.TOOLBOX.value,),
+            memory_type=MemoryType.TOOLBOX,
+            limit=1000,
+        )
+
+        regex = re.compile(pattern, re.IGNORECASE)
+        results = []
+
+        for tool in tools:
+            name = tool.metadata.get("tool_name", "")
+            desc = tool.metadata.get("description", "")
+            server = tool.metadata.get("server", "")
+
+            if regex.search(name) or regex.search(desc):
+                results.append({
+                    "server": server,
+                    "name": name,
+                    "description": desc,
+                })
+
+        return results
+
+    async def toolbox_cat(self, tool_path: str) -> dict[str, Any]:
+        """
+        Get full details of a tool.
+
+        Args:
+            tool_path: Path to the tool in format "server/tool_name".
+
+        Returns:
+            Dict with full tool information including parameters.
+
+        Raises:
+            ValueError: If tool_path format is invalid.
+            KeyError: If tool is not found.
+
+        Example:
+            ```python
+            tool_info = await harness.toolbox_cat("github/create_issue")
+            # {
+            #     "server": "github",
+            #     "name": "create_issue",
+            #     "description": "Create a new GitHub issue",
+            #     "parameters": {...}
+            # }
+            ```
+        """
+        parts = tool_path.strip("/").split("/")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid tool path: {tool_path}. Expected format: server/tool_name")
+
+        server, tool_name = parts
+        namespace = self._build_namespace(MemoryType.TOOLBOX, server)
+
+        tools = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.TOOLBOX,
+            limit=1000,
+        )
+
+        for tool in tools:
+            if tool.metadata.get("tool_name") == tool_name:
+                return {
+                    "server": server,
+                    "name": tool_name,
+                    "description": tool.metadata.get("description", ""),
+                    "parameters": tool.metadata.get("parameters", {}),
+                }
+
+        raise KeyError(f"Tool not found: {tool_path}")
+
+    # =========================================================================
+    # Summary Memory (with expansion)
+    # =========================================================================
+
+    async def add_summary(
+        self,
+        summary: str,
+        source_ids: list[str],
+        thread_id: Optional[str] = None,
+    ) -> str:
+        """
+        Add a summary that references source memories.
+
+        Args:
+            summary: The summary text.
+            source_ids: List of memory IDs that this summary is derived from.
+            thread_id: Optional thread ID if this summarizes a conversation.
+
+        Returns:
+            The ID of the created summary memory.
+
+        Example:
+            ```python
+            summary_id = await harness.add_summary(
+                summary="User discussed Python async programming and asked about GIL",
+                source_ids=["msg-1", "msg-2", "msg-3"],
+                thread_id="chat-123"
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.SUMMARY)
+        if thread_id:
+            namespace = self._build_namespace(MemoryType.SUMMARY, thread_id)
+
+        embedding = await self._embed(summary)
+
+        meta = {
+            "source_ids": source_ids,
+            "thread_id": thread_id,
+        }
+
+        unit = self._create_unit(
+            content=summary,
+            memory_type=MemoryType.SUMMARY,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def expand_summary(self, summary_id: str) -> list[MemoryUnit]:
+        """
+        Expand a summary to retrieve its source memories.
+
+        Args:
+            summary_id: The ID of the summary to expand.
+
+        Returns:
+            List of source MemoryUnit objects that the summary was derived from.
+
+        Raises:
+            KeyError: If the summary is not found.
+
+        Example:
+            ```python
+            sources = await harness.expand_summary("summary-123")
+            for source in sources:
+                print(f"Source: {source.content[:100]}...")
+            ```
+        """
+        summary = await self._backend.get(summary_id)
+        if not summary:
+            raise KeyError(f"Summary not found: {summary_id}")
+
+        source_ids = summary.metadata.get("source_ids", [])
+        sources = []
+
+        for source_id in source_ids:
+            source = await self._backend.get(source_id)
+            if source:
+                sources.append(source)
+
+        return sources
+
+    # =========================================================================
+    # Tool Log Memory
+    # =========================================================================
+
+    async def add_tool_log(
+        self,
+        thread_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        result: str,
+        status: str,
+    ) -> str:
+        """
+        Log a tool execution.
+
+        Args:
+            thread_id: The conversation thread ID.
+            tool_name: Name of the executed tool.
+            args: Arguments passed to the tool.
+            result: Result or output from the tool.
+            status: Execution status ("success", "error", "timeout").
+
+        Returns:
+            The ID of the created log entry.
+
+        Example:
+            ```python
+            log_id = await harness.add_tool_log(
+                thread_id="chat-123",
+                tool_name="github/create_issue",
+                args={"title": "Bug fix", "body": "Fixed the bug"},
+                result="Issue #42 created",
+                status="success"
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOL_LOG, thread_id)
+
+        content = f"Tool: {tool_name}\nStatus: {status}\nResult: {result}"
+        embedding = await self._embed(content)
+
+        meta = {
+            "thread_id": thread_id,
+            "tool_name": tool_name,
+            "args": args,
+            "result": result,
+            "status": status,
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.TOOL_LOG,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def get_tool_log(
+        self,
+        thread_id: str,
+        limit: int = 20,
+    ) -> list[MemoryUnit]:
+        """
+        Retrieve tool execution log for a thread.
+
+        Args:
+            thread_id: The conversation thread ID.
+            limit: Maximum number of log entries to retrieve.
+
+        Returns:
+            List of tool log MemoryUnit objects, ordered from oldest to newest.
+
+        Example:
+            ```python
+            logs = await harness.get_tool_log("chat-123", limit=10)
+            for log in logs:
+                print(f"{log.metadata['tool_name']}: {log.metadata['status']}")
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOL_LOG, thread_id)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.TOOL_LOG,
+            limit=limit,
+        )
+        results.sort(key=lambda u: u.created_at)
+        return results
+
+    # =========================================================================
+    # Skills Memory
+    # =========================================================================
+
+    async def add_skill(
+        self,
+        name: str,
+        description: str,
+        examples: Optional[list[str]] = None,
+    ) -> str:
+        """
+        Add a learned skill to memory.
+
+        Args:
+            name: Name of the skill.
+            description: Description of what the skill does.
+            examples: Optional list of example usages.
+
+        Returns:
+            The ID of the created skill memory.
+
+        Example:
+            ```python
+            skill_id = await harness.add_skill(
+                name="code_review",
+                description="Review code for bugs, style issues, and improvements",
+                examples=[
+                    "Review this Python function for efficiency",
+                    "Check this code for security vulnerabilities"
+                ]
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.SKILLS)
+
+        content = f"Skill: {name}\n{description}"
+        if examples:
+            content += "\nExamples:\n" + "\n".join(f"- {ex}" for ex in examples)
+
+        embedding = await self._embed(content)
+
+        meta = {
+            "name": name,
+            "description": description,
+            "examples": examples or [],
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.SKILLS,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_skills(
+        self,
+        query: str,
+        k: int = 3,
+    ) -> list[MemoryUnit]:
+        """
+        Search for relevant skills.
+
+        Args:
+            query: The search query.
+            k: Number of results to return.
+
+        Returns:
+            List of matching skill MemoryUnit objects.
+
+        Example:
+            ```python
+            skills = await harness.search_skills("review code for bugs")
+            for skill in skills:
+                print(f"Skill: {skill.metadata['name']}")
+            ```
+        """
+        query_embedding = await self._embed(query)
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=MemoryType.SKILLS,
+            k=k,
+        )
+
+    # =========================================================================
+    # File Memory
+    # =========================================================================
+
+    async def add_file(
+        self,
+        path: str,
+        content_summary: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """
+        Add a file reference to memory.
+
+        Args:
+            path: Path to the file.
+            content_summary: Optional summary of the file contents.
+            metadata: Optional additional metadata (size, type, etc.).
+
+        Returns:
+            The ID of the created file memory.
+
+        Example:
+            ```python
+            file_id = await harness.add_file(
+                path="/src/main.py",
+                content_summary="Main application entry point with FastAPI setup",
+                metadata={"size": 2048, "language": "python"}
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.FILE)
+
+        content = f"File: {path}"
+        if content_summary:
+            content += f"\n{content_summary}"
+
+        embedding = await self._embed(content)
+
+        meta = metadata or {}
+        meta["path"] = path
+        if content_summary:
+            meta["content_summary"] = content_summary
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.FILE,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_files(
+        self,
+        query: str,
+        k: int = 5,
+    ) -> list[MemoryUnit]:
+        """
+        Search for files by content or path.
+
+        Args:
+            query: The search query.
+            k: Number of results to return.
+
+        Returns:
+            List of matching file MemoryUnit objects.
+
+        Example:
+            ```python
+            files = await harness.search_files("FastAPI application")
+            for f in files:
+                print(f"File: {f.metadata['path']}")
+            ```
+        """
+        query_embedding = await self._embed(query)
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=MemoryType.FILE,
+            k=k,
+        )
+
+    # =========================================================================
+    # Persona Memory
+    # =========================================================================
+
+    async def add_persona(
+        self,
+        block_name: str,
+        content: str,
+    ) -> str:
+        """
+        Add or update a persona block.
+
+        Args:
+            block_name: Name of the persona block (e.g., "preferences", "background").
+            content: The persona content.
+
+        Returns:
+            The ID of the created/updated persona block.
+
+        Example:
+            ```python
+            await harness.add_persona(
+                block_name="communication_style",
+                content="Prefers concise, technical explanations with code examples"
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.PERSONA, block_name)
+
+        # Check if block already exists and delete it
+        existing = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.PERSONA,
+            limit=1,
+        )
+        for unit in existing:
+            await self._backend.delete(unit.id)
+
+        embedding = await self._embed(content)
+
+        meta = {
+            "block_name": block_name,
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.PERSONA,
+            namespace=namespace,
+            metadata=meta,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def get_persona(
+        self,
+        block_name: Optional[str] = None,
+    ) -> str:
+        """
+        Retrieve persona content.
+
+        Args:
+            block_name: Optional specific block name. If None, returns all blocks.
+
+        Returns:
+            The persona content as a string.
+
+        Example:
+            ```python
+            # Get specific block
+            style = await harness.get_persona("communication_style")
+
+            # Get all persona blocks
+            full_persona = await harness.get_persona()
+            ```
+        """
+        if block_name:
+            namespace = self._build_namespace(MemoryType.PERSONA, block_name)
+            results = await self._backend.list_by_namespace(
+                namespace=namespace,
+                memory_type=MemoryType.PERSONA,
+                limit=1,
+            )
+            return results[0].content if results else ""
+
+        # Get all persona blocks
+        namespace = self._build_namespace(MemoryType.PERSONA)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.PERSONA,
+            limit=self._config.persona_max_blocks,
+        )
+
+        blocks = []
+        for unit in results:
+            block_name = unit.metadata.get("block_name", "unknown")
+            blocks.append(f"## {block_name}\n{unit.content}")
+
+        return "\n\n".join(blocks)
+
+    # =========================================================================
+    # Generic Operations
+    # =========================================================================
+
+    async def add(
+        self,
+        content: str,
+        memory_type: Optional[str] = None,
+        namespace: Optional[tuple[str, ...]] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """
+        Add a generic memory unit.
+
+        Args:
+            content: The memory content.
+            memory_type: Optional memory type string. Defaults to "knowledge".
+            namespace: Optional custom namespace.
+            metadata: Optional metadata.
+
+        Returns:
+            The ID of the created memory unit.
+
+        Example:
+            ```python
+            mem_id = await harness.add(
+                content="Important note about the project",
+                memory_type="knowledge",
+                metadata={"importance": "high"}
+            )
+            ```
+        """
+        mem_type = MemoryType(memory_type) if memory_type else MemoryType.KNOWLEDGE
+        ns = namespace if namespace else self._build_namespace(mem_type)
+
+        embedding = await self._embed(content)
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=mem_type,
+            namespace=ns,
+            metadata=metadata,
+            embedding=embedding,
+        )
+
+        return await self._backend.store(unit)
+
+    async def search(
+        self,
+        query: str,
+        memory_type: Optional[str] = None,
+        k: int = 10,
+    ) -> list[MemoryUnit]:
+        """
+        Search across memories.
+
+        Args:
+            query: The search query.
+            memory_type: Optional memory type to filter by.
+            k: Number of results to return.
+
+        Returns:
+            List of matching MemoryUnit objects.
+
+        Example:
+            ```python
+            results = await harness.search("Python programming", k=5)
+            ```
+        """
+        query_embedding = await self._embed(query)
+        mem_type = MemoryType(memory_type) if memory_type else None
+
+        return await self._backend.search(
+            query_embedding=query_embedding,
+            memory_type=mem_type,
+            k=k,
+        )
+
+    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+        """
+        Retrieve a specific memory by ID.
+
+        Args:
+            memory_id: The memory ID.
+
+        Returns:
+            The MemoryUnit if found, None otherwise.
+
+        Example:
+            ```python
+            memory = await harness.get("mem-123")
+            if memory:
+                print(memory.content)
+            ```
+        """
+        return await self._backend.get(memory_id)
+
+    async def update(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Update a memory unit.
+
+        Args:
+            memory_id: The memory ID to update.
+            content: Optional new content.
+            metadata: Optional metadata to merge.
+
+        Returns:
+            True if updated successfully, False if not found.
+
+        Example:
+            ```python
+            success = await harness.update(
+                "mem-123",
+                content="Updated content",
+                metadata={"updated": True}
+            )
+            ```
+        """
+        updates: dict[str, Any] = {}
+
+        if content is not None:
+            updates["content"] = content
+            updates["embedding"] = await self._embed(content)
+
+        if metadata is not None:
+            updates["metadata"] = metadata
+
+        if not updates:
+            return True  # Nothing to update
+
+        return await self._backend.update(memory_id, updates)
+
+    async def delete(self, memory_id: str) -> bool:
+        """
+        Delete a memory unit.
+
+        Args:
+            memory_id: The memory ID to delete.
+
+        Returns:
+            True if deleted successfully, False if not found.
+
+        Example:
+            ```python
+            deleted = await harness.delete("mem-123")
+            ```
+        """
+        return await self._backend.delete(memory_id)
+
+    # =========================================================================
+    # Context Assembly
+    # =========================================================================
+
+    async def assemble_context(
+        self,
+        query: str,
+        thread_id: str,
+        max_tokens: int = 4000,
+    ) -> str:
+        """
+        Assemble relevant context for an agent query.
+
+        This method gathers relevant memories from multiple sources:
+        - Recent conversation history
+        - Relevant knowledge base entries
+        - Matching entities
+        - Applicable workflows
+        - Persona information
+
+        Args:
+            query: The query to assemble context for.
+            thread_id: The conversation thread ID.
+            max_tokens: Maximum tokens in the assembled context.
+
+        Returns:
+            A formatted context string ready to be used in a prompt.
+
+        Example:
+            ```python
+            context = await harness.assemble_context(
+                query="How do I deploy the application?",
+                thread_id="chat-123",
+                max_tokens=4000
+            )
+            # Use context in your prompt
+            prompt = f"{context}\\n\\nUser: {query}"
+            ```
+        """
+        sections = []
+        estimated_tokens = 0
+        chars_per_token = 4  # Rough estimate
+
+        # 1. Persona (always include, typically small)
+        persona = await self.get_persona()
+        if persona:
+            sections.append(f"## Persona\n{persona}")
+            estimated_tokens += len(persona) // chars_per_token
+
+        # 2. Recent conversation history
+        if estimated_tokens < max_tokens:
+            messages = await self.get_conversational(thread_id, limit=10)
+            if messages:
+                conv_text = "\n".join(
+                    f"{m.metadata.get('role', 'unknown')}: {m.content}"
+                    for m in messages[-5:]  # Last 5 messages
+                )
+                sections.append(f"## Recent Conversation\n{conv_text}")
+                estimated_tokens += len(conv_text) // chars_per_token
+
+        # 3. Relevant knowledge
+        if estimated_tokens < max_tokens:
+            knowledge = await self.search_knowledge(query, k=3)
+            if knowledge:
+                kb_text = "\n\n".join(
+                    f"- {k.content}" for k in knowledge
+                )
+                sections.append(f"## Relevant Knowledge\n{kb_text}")
+                estimated_tokens += len(kb_text) // chars_per_token
+
+        # 4. Relevant entities
+        if estimated_tokens < max_tokens:
+            entities = await self.search_entity(query, k=3)
+            if entities:
+                ent_text = "\n".join(
+                    f"- {e.metadata.get('name', 'Unknown')}: {e.content}"
+                    for e in entities
+                )
+                sections.append(f"## Related Entities\n{ent_text}")
+                estimated_tokens += len(ent_text) // chars_per_token
+
+        # 5. Relevant workflows
+        if estimated_tokens < max_tokens:
+            workflows = await self.search_workflow(query, k=2)
+            if workflows:
+                wf_text = "\n\n".join(
+                    f"**{w.metadata.get('task', 'Task')}**\n{w.content}"
+                    for w in workflows
+                )
+                sections.append(f"## Relevant Workflows\n{wf_text}")
+                estimated_tokens += len(wf_text) // chars_per_token
+
+        # 6. Relevant skills
+        if estimated_tokens < max_tokens:
+            skills = await self.search_skills(query, k=2)
+            if skills:
+                skills_text = "\n".join(
+                    f"- {s.metadata.get('name', 'Skill')}: {s.metadata.get('description', '')}"
+                    for s in skills
+                )
+                sections.append(f"## Available Skills\n{skills_text}")
+
+        return "\n\n".join(sections)
+
+    # =========================================================================
+    # Memory Tools (for agents)
+    # =========================================================================
+
+    def get_memory_tools(self) -> list[dict[str, Any]]:
+        """
+        Get tool definitions for agents to explore their memory.
+
+        Returns a list of tool definitions that can be provided to an AI agent,
+        allowing the agent to search, retrieve, and manage its own memories.
+
+        Returns:
+            List of tool definition dicts compatible with OpenAI/Anthropic format.
+
+        Example:
+            ```python
+            tools = harness.get_memory_tools()
+            # Pass to your LLM API
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                tools=tools
+            )
+            ```
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "memory_search",
+                    "description": "Search through memories by semantic similarity",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            },
+                            "memory_type": {
+                                "type": "string",
+                                "enum": [t.value for t in MemoryType],
+                                "description": "Optional filter by memory type"
+                            },
+                            "k": {
+                                "type": "integer",
+                                "description": "Number of results (default 5)",
+                                "default": 5
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "memory_get",
+                    "description": "Retrieve a specific memory by ID",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": {
+                                "type": "string",
+                                "description": "The memory ID to retrieve"
+                            }
+                        },
+                        "required": ["memory_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "memory_add",
+                    "description": "Add a new memory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The content to remember"
+                            },
+                            "memory_type": {
+                                "type": "string",
+                                "enum": [t.value for t in MemoryType],
+                                "description": "Type of memory (default: knowledge)"
+                            },
+                            "metadata": {
+                                "type": "object",
+                                "description": "Optional metadata"
+                            }
+                        },
+                        "required": ["content"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "toolbox_tree",
+                    "description": "View the toolbox structure as a tree",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to start from (default: /)",
+                                "default": "/"
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "toolbox_cat",
+                    "description": "Get full details of a tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "tool_path": {
+                                "type": "string",
+                                "description": "Path to tool in format: server/tool_name"
+                            }
+                        },
+                        "required": ["tool_path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "expand_summary",
+                    "description": "Expand a summary to see its source memories",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary_id": {
+                                "type": "string",
+                                "description": "The summary memory ID to expand"
+                            }
+                        },
+                        "required": ["summary_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_conversation_history",
+                    "description": "Retrieve conversation history for a thread",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thread_id": {
+                                "type": "string",
+                                "description": "The conversation thread ID"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum messages to retrieve (default 20)",
+                                "default": 20
+                            }
+                        },
+                        "required": ["thread_id"]
+                    }
+                }
+            },
+        ]
