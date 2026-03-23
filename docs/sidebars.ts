@@ -4,6 +4,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     'intro',
     'getting-started',
+    'usage-langchain',
     {
       type: 'category',
       label: 'Core Concepts',
