@@ -424,3 +424,124 @@ await tool.ainvoke({
 - Explore [Memory Types](./concepts/memory-types) to understand what data each type stores
 - Read [Context Assembly](./agents/context-assembler) to learn how `assemble_context` works
 - Check [Embedded Agents](./agents/overview) for summarization and consolidation patterns
+
+## Fast Path / Slow Path Architecture
+
+memharness supports a **fast path / slow path** architecture for production agent systems:
+
+- **Fast Path** (user-facing, low latency): Save message → assemble context → return. No extraction, no summarization in the hot path.
+- **Slow Path** (background workers, async): Entity extraction, summarization, consolidation, garbage collection.
+
+This separation ensures your user-facing agent is always fast, while background workers enrich memory asynchronously.
+
+### Fast Path Example
+
+```python
+"""Fast path: user-facing agent interactions."""
+import asyncio
+from memharness import MemoryHarness
+from memharness.core.fast_path import FastPath
+
+async def main():
+    # Initialize memory harness
+    harness = MemoryHarness('sqlite:///memory.db')
+    await harness.connect()
+
+    # Fast path: user-facing
+    fast = FastPath(harness)
+
+    # User sends message
+    ctx = await fast.process_user_message('thread-1', 'How do I deploy?')
+    messages = ctx.to_messages()  # feed to LLM
+
+    # Your LLM responds (using langchain, openai, anthropic, etc.)
+    # Example with LangChain:
+    # from langchain.chat_models import init_chat_model
+    # llm = init_chat_model("anthropic:claude-sonnet-4-6")
+    # response = await llm.ainvoke(messages)
+    response = "Deploy using docker compose up -d..."
+
+    # Save assistant response
+    await fast.process_assistant_response('thread-1', response)
+
+    await harness.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Slow Path Example
+
+```python
+"""Slow path: run periodically (cron, background task, etc.)"""
+import asyncio
+from memharness import MemoryHarness
+from memharness.core.slow_path import SlowPath
+
+async def main():
+    # Initialize memory harness
+    harness = MemoryHarness('sqlite:///memory.db')
+    await harness.connect()
+
+    # Slow path: background workers
+    slow = SlowPath(harness)
+
+    # Run all background workers
+    results = await slow.run_all()
+
+    # Print results
+    for r in results:
+        print(f'{r.worker}: processed={r.processed}, errors={r.errors}, '
+              f'duration={r.duration_ms:.1f}ms')
+
+    await harness.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### What Each Path Does
+
+**Fast Path** (deterministic, low latency):
+1. `process_user_message()` → save user message to conv table + assemble context
+2. `process_assistant_response()` → save assistant response to conv table
+3. That's it. No extraction, no summarization in the hot path.
+
+**Slow Path** (background workers, async):
+1. **Entity Extraction**: Scan new conv messages → extract entities → upsert (update existing, don't duplicate)
+2. **Summarization**: When thread gets long → compress older messages
+3. **Consolidation**: Scan entity table → merge duplicates
+4. **Garbage Collection**: Archive/delete old data
+
+### With LLMs (optional)
+
+You can optionally provide LLMs to the slow path for better entity extraction and summarization:
+
+```python
+from langchain.chat_models import init_chat_model
+from memharness.core.slow_path import SlowPath
+
+llm = init_chat_model("anthropic:claude-sonnet-4-6")
+
+# Pass LLMs to slow path workers
+slow = SlowPath(
+    harness,
+    entity_extractor_llm=llm,
+    summarizer_llm=llm,
+)
+
+results = await slow.run_all()
+```
+
+Without LLMs, the slow path uses heuristic-based extraction and summarization (good for testing, lower cost).
+
+### Context Assembly Prefers Recent Entities
+
+The context assembly agent (used by fast path) automatically prefers recent entities based on `updated_at` timestamp. This solves the "staleness problem":
+
+- If user says "I work at SAP" (today)
+- And historical data says "I work at Google" (last year)
+- The entity extractor (slow path) UPSERTs the entity, updating `updated_at`
+- Context assembly (fast path) returns "works at SAP" (most recent)
+
+This happens automatically — no extra code needed.
