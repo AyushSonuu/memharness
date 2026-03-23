@@ -22,113 +22,19 @@ import os
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
-from typing import (
-    Any,
-    Protocol,
-    runtime_checkable,
-)
+from typing import Any
+
+from memharness.backends.memory import InMemoryBackend
+from memharness.backends.protocol import BackendProtocol
+from memharness.core.embedding import default_embedding_fn
+from memharness.types import MemoryType, MemoryUnit
 
 # =============================================================================
-# Type Definitions
+# Configuration
 # =============================================================================
-
-
-class MemoryType(str, Enum):
-    """Enumeration of all supported memory types."""
-
-    CONVERSATIONAL = "conversational"
-    KNOWLEDGE = "knowledge"
-    ENTITY = "entity"
-    WORKFLOW = "workflow"
-    TOOLBOX = "toolbox"
-    SUMMARY = "summary"
-    TOOL_LOG = "tool_log"
-    SKILLS = "skills"
-    FILE = "file"
-    PERSONA = "persona"
-
-
-@dataclass
-class MemoryUnit:
-    """
-    A single unit of memory stored in the harness.
-
-    This is the fundamental data structure representing any piece of memory,
-    regardless of its type. Each MemoryUnit has a unique ID, content, type,
-    and associated metadata.
-
-    Attributes:
-        content: The actual content/text of the memory.
-        memory_type: The type of memory (e.g., conversational, knowledge).
-        id: Unique identifier for this memory unit.
-        namespace: Hierarchical namespace tuple for organization.
-        embedding: Optional vector embedding for similarity search.
-        metadata: Additional key-value metadata.
-        created_at: Timestamp when the memory was created.
-        updated_at: Timestamp when the memory was last updated.
-        thread_id: Optional thread ID for conversational memories.
-        parent_id: Optional parent memory ID for hierarchical relationships.
-    """
-
-    content: str
-    memory_type: MemoryType
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    namespace: tuple[str, ...] = field(default_factory=tuple)
-    embedding: list[float] | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    thread_id: str | None = None
-    parent_id: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the MemoryUnit to a dictionary."""
-        return {
-            "id": self.id,
-            "content": self.content,
-            "memory_type": self.memory_type.value,
-            "namespace": list(self.namespace),
-            "embedding": self.embedding,
-            "metadata": self.metadata,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-            "thread_id": self.thread_id,
-            "parent_id": self.parent_id,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> MemoryUnit:
-        """Create a MemoryUnit from a dictionary."""
-        return cls(
-            id=data["id"],
-            content=data["content"],
-            memory_type=MemoryType(data["memory_type"]),
-            namespace=tuple(data.get("namespace", [])),
-            embedding=data.get("embedding"),
-            metadata=data.get("metadata", {}),
-            created_at=datetime.fromisoformat(data["created_at"])
-            if isinstance(data.get("created_at"), str)
-            else data.get("created_at", datetime.now(UTC)),
-            updated_at=datetime.fromisoformat(data["updated_at"])
-            if isinstance(data.get("updated_at"), str)
-            else data.get("updated_at", datetime.now(UTC)),
-            thread_id=data.get("thread_id"),
-            parent_id=data.get("parent_id"),
-        )
-
-    def to_json(self) -> str:
-        """Convert the MemoryUnit to a JSON string."""
-        return json.dumps(self.to_dict())
-
-    @classmethod
-    def from_json(cls, json_str: str) -> MemoryUnit:
-        """Create a MemoryUnit from a JSON string."""
-        data = json.loads(json_str)
-        return cls.from_dict(data)
 
 
 @dataclass
@@ -181,206 +87,6 @@ class MemharnessConfig:
             data = json.loads(content)
 
         return cls.from_dict(data)
-
-
-@runtime_checkable
-class BackendProtocol(Protocol):
-    """
-    Protocol defining the interface that all backends must implement.
-
-    Backends are responsible for the actual storage and retrieval of memory units.
-    They handle persistence, indexing, and search operations.
-    """
-
-    async def connect(self) -> None:
-        """Establish connection to the backend storage."""
-        ...
-
-    async def disconnect(self) -> None:
-        """Close connection to the backend storage."""
-        ...
-
-    async def store(self, unit: MemoryUnit) -> str:
-        """Store a memory unit and return its ID."""
-        ...
-
-    async def get(self, memory_id: str) -> MemoryUnit | None:
-        """Retrieve a memory unit by ID."""
-        ...
-
-    async def search(
-        self,
-        query_embedding: list[float],
-        memory_type: MemoryType | None = None,
-        namespace: tuple[str, ...] | None = None,
-        filters: dict[str, Any] | None = None,
-        k: int = 10,
-    ) -> list[MemoryUnit]:
-        """Search for memory units by similarity."""
-        ...
-
-    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
-        """Update a memory unit."""
-        ...
-
-    async def delete(self, memory_id: str) -> bool:
-        """Delete a memory unit."""
-        ...
-
-    async def list_by_namespace(
-        self,
-        namespace: tuple[str, ...],
-        memory_type: MemoryType | None = None,
-        limit: int = 100,
-    ) -> list[MemoryUnit]:
-        """List memory units by namespace prefix."""
-        ...
-
-
-# =============================================================================
-# In-Memory Backend Implementation
-# =============================================================================
-
-
-class InMemoryBackend:
-    """
-    Simple in-memory backend for development and testing.
-
-    This backend stores all data in memory and is lost when the process ends.
-    It provides basic similarity search using cosine similarity.
-    """
-
-    def __init__(self) -> None:
-        self._storage: dict[str, MemoryUnit] = {}
-        self._connected: bool = False
-
-    async def connect(self) -> None:
-        """Mark the backend as connected."""
-        self._connected = True
-
-    async def disconnect(self) -> None:
-        """Mark the backend as disconnected."""
-        self._connected = False
-
-    async def store(self, unit: MemoryUnit) -> str:
-        """Store a memory unit in memory."""
-        self._storage[unit.id] = unit
-        return unit.id
-
-    async def get(self, memory_id: str) -> MemoryUnit | None:
-        """Retrieve a memory unit by ID."""
-        return self._storage.get(memory_id)
-
-    async def search(
-        self,
-        query_embedding: list[float],
-        memory_type: MemoryType | None = None,
-        namespace: tuple[str, ...] | None = None,
-        filters: dict[str, Any] | None = None,
-        k: int = 10,
-    ) -> list[MemoryUnit]:
-        """Search for memory units using cosine similarity."""
-        candidates = []
-
-        for unit in self._storage.values():
-            # Filter by memory type
-            if memory_type and unit.memory_type != memory_type:
-                continue
-
-            # Filter by namespace prefix
-            if namespace and not self._namespace_matches(unit.namespace, namespace):
-                continue
-
-            # Apply metadata filters
-            if filters and not self._matches_filters(unit.metadata, filters):
-                continue
-
-            # Calculate similarity if embeddings exist
-            if unit.embedding and query_embedding:
-                similarity = self._cosine_similarity(query_embedding, unit.embedding)
-                candidates.append((similarity, unit))
-            else:
-                # No embedding, use 0 similarity but still include
-                candidates.append((0.0, unit))
-
-        # Sort by similarity descending and return top k
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return [unit for _, unit in candidates[:k]]
-
-    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
-        """Update a memory unit."""
-        if memory_id not in self._storage:
-            return False
-
-        unit = self._storage[memory_id]
-
-        if "content" in updates:
-            unit.content = updates["content"]
-        if "metadata" in updates:
-            unit.metadata.update(updates["metadata"])
-        if "embedding" in updates:
-            unit.embedding = updates["embedding"]
-
-        unit.updated_at = datetime.now(UTC)
-        return True
-
-    async def delete(self, memory_id: str) -> bool:
-        """Delete a memory unit."""
-        if memory_id in self._storage:
-            del self._storage[memory_id]
-            return True
-        return False
-
-    async def list_by_namespace(
-        self,
-        namespace: tuple[str, ...],
-        memory_type: MemoryType | None = None,
-        limit: int = 100,
-    ) -> list[MemoryUnit]:
-        """List memory units by namespace prefix."""
-        results = []
-
-        for unit in self._storage.values():
-            if not self._namespace_matches(unit.namespace, namespace):
-                continue
-            if memory_type and unit.memory_type != memory_type:
-                continue
-            results.append(unit)
-            if len(results) >= limit:
-                break
-
-        # Sort by created_at descending
-        results.sort(key=lambda u: u.created_at, reverse=True)
-        return results[:limit]
-
-    def _namespace_matches(self, unit_ns: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
-        """Check if a namespace starts with the given prefix."""
-        if len(prefix) > len(unit_ns):
-            return False
-        return unit_ns[: len(prefix)] == prefix
-
-    def _matches_filters(self, metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
-        """Check if metadata matches all filters."""
-        for key, value in filters.items():
-            if key not in metadata:
-                return False
-            if metadata[key] != value:
-                return False
-        return True
-
-    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
-        """Calculate cosine similarity between two vectors."""
-        if len(a) != len(b):
-            return 0.0
-
-        dot_product = sum(x * y for x, y in zip(a, b, strict=False))
-        norm_a = sum(x * x for x in a) ** 0.5
-        norm_b = sum(x * x for x in b) ** 0.5
-
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-
-        return dot_product / (norm_a * norm_b)
 
 
 # =============================================================================
@@ -436,49 +142,6 @@ def _parse_backend(backend_uri: str) -> BackendProtocol:
         f"Unrecognized backend URI: {backend_uri}. "
         "Supported formats: memory://, sqlite:///path, postgresql://..."
     )
-
-
-# =============================================================================
-# Default Embedding Function
-# =============================================================================
-
-
-def _default_embedding_fn(text: str) -> list[float]:
-    """
-    Default embedding function that returns a simple hash-based embedding.
-
-    This is a placeholder that should be replaced with a real embedding
-    model in production. It generates a deterministic but low-quality
-    embedding based on character hashing.
-
-    Args:
-        text: The text to embed.
-
-    Returns:
-        A 384-dimensional embedding vector.
-    """
-    # Simple hash-based embedding for development/testing
-    # In production, this should be replaced with a real model
-    import hashlib
-
-    dimension = 384
-    embedding = [0.0] * dimension
-
-    # Hash the text and use it to seed pseudo-random values
-    text_bytes = text.encode("utf-8")
-    hash_bytes = hashlib.sha256(text_bytes).digest()
-
-    # Generate embedding values from hash
-    for i in range(dimension):
-        byte_idx = i % len(hash_bytes)
-        embedding[i] = (hash_bytes[byte_idx] - 128) / 128.0
-
-    # Normalize the embedding
-    norm = sum(x * x for x in embedding) ** 0.5
-    if norm > 0:
-        embedding = [x / norm for x in embedding]
-
-    return embedding
 
 
 # =============================================================================
@@ -550,7 +213,7 @@ class MemoryHarness:
         else:
             self._backend = backend
 
-        self._embedding_fn = embedding_fn or _default_embedding_fn
+        self._embedding_fn = embedding_fn or default_embedding_fn
         self._config = config or MemharnessConfig()
         self._namespace_prefix = namespace_prefix or ()
         self._connected = False

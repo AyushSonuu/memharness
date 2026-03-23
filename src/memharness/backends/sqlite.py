@@ -16,7 +16,7 @@ from typing import Any
 import aiosqlite
 
 # Import MemoryType and MemoryUnit from parent module
-from ..harness import MemoryType, MemoryUnit
+from memharness.types import MemoryType, MemoryUnit
 
 logger = logging.getLogger(__name__)
 

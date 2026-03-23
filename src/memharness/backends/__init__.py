@@ -30,11 +30,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from memharness.backends.memory import InMemoryBackend
 from memharness.backends.protocol import BackendProtocol
 from memharness.backends.sqlite import SqliteBackend
-
-# Import InMemoryBackend from harness since it's already there
-from memharness.harness import InMemoryBackend
 
 if TYPE_CHECKING:
     pass

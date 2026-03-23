@@ -20,8 +20,9 @@ Quick Start:
 """
 
 from memharness.config import Config, MemharnessConfig
-from memharness.harness import MemoryHarness, MemoryType, MemoryUnit
+from memharness.core.harness import MemoryHarness
 from memharness.registry import MemoryTypeRegistry
+from memharness.types import MemoryType, MemoryUnit
 
 __version__ = "0.1.0"
 __author__ = "Ayush Sonuu"
