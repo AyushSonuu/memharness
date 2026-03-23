@@ -122,28 +122,59 @@ function Feature({title, emoji, description}: FeatureItem) {
 
 const agentExample = `from memharness import MemoryHarness
 from memharness.tools import get_read_tools
+from memharness.agents.agent_workflow import MemoryWorkflowMiddleware
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from memharness.agents import ContextAssemblyAgent
 
-# 1. Create memory harness (SQLite for dev, PostgreSQL for prod)
+# --- BEFORE middleware: inject context + load conversation ---
+class ContextMiddleware(AgentMiddleware):
+    def __init__(self, harness, thread_id):
+        super().__init__()
+        self.harness = harness
+        self.tid = thread_id
+        self._ctx = ContextAssemblyAgent(harness)
+        self._loaded = 0
+
+    async def abefore_model(self, state, runtime):
+        msgs = state.get("messages", [])
+        query = next((m.content for m in reversed(msgs) if isinstance(m, HumanMessage)), "")
+        if not query: return None
+        # Save user message
+        await self.harness.add_conversational(self.tid, "user", query)
+        # Assemble context (KB, entities, workflows, persona)
+        ctx = await self._ctx.assemble(query=query, thread_id=self.tid)
+        return {"messages": ctx.to_messages()}
+
+    async def aafter_model(self, state, runtime):
+        # Save assistant response
+        msgs = state.get("messages", [])
+        last = msgs[-1] if msgs else None
+        if isinstance(last, AIMessage) and last.content:
+            await self.harness.add_conversational(self.tid, "assistant", last.content)
+        return None
+
+# --- Setup ---
 harness = MemoryHarness("sqlite:///agent_memory.db")
 await harness.connect()
 
-# 2. Get read-only memory tools for agent self-awareness
-memory_tools = get_read_tools(harness)
-
-# 3. Create a memory-aware agent
+thread_id = "user-alice"
 agent = create_agent(
-    model="anthropic:claude-sonnet-4-6",  # any LLM via init_chat_model
-    tools=memory_tools + your_other_tools,
-    system_prompt="""You are a helpful assistant with persistent memory.
-Use your memory tools to search and read important information.
-Before answering, search your memory for relevant context.""",
+    model="anthropic:claude-sonnet-4-6",
+    tools=get_read_tools(harness),       # 5 read-only tools
+    middleware=[
+        ContextMiddleware(harness, thread_id),          # BEFORE: context + save msgs
+        MemoryWorkflowMiddleware(harness, thread_id),   # AFTER: entities + workflow + summarize
+    ],
 )
 
-# 4. Agent can now search, read, and assemble context...
-result = await agent.ainvoke({
-    "messages": [{"role": "user", "content": "What did we discuss yesterday?"}]
-})`;
+# Turn 1: agent saves this to conv table via middleware
+r1 = await agent.ainvoke({"messages": [{"role": "user", "content": "I work at SAP"}]})
+
+# Turn 2: middleware loads past messages — agent remembers!
+r2 = await agent.ainvoke({"messages": [{"role": "user", "content": "Where do I work?"}]})
+# → "You work at SAP"  (loaded from conversation memory)`;
 
 const standaloneExample = `from memharness import MemoryHarness
 from memharness.agents import ContextAssemblyAgent
