@@ -70,7 +70,7 @@ class TestConversationalMemory:
     @pytest.mark.asyncio
     async def test_conversational_with_metadata(self, memory):
         """Test conversational messages with metadata."""
-        msg_id = await memory.add_conversational(
+        await memory.add_conversational(
             "t1",
             "user",
             "Hello with metadata",
@@ -90,7 +90,7 @@ class TestConversationalMemory:
 
         messages = await memory.get_conversational("t1")
 
-        roles = [m.metadata.get("role") or getattr(m, "role", None) for m in messages]
+        [m.metadata.get("role") or getattr(m, "role", None) for m in messages]
         # Verify all roles are captured
         assert len(messages) == 3
 
@@ -114,7 +114,7 @@ class TestKnowledgeBase:
     async def test_search_knowledge(self, memory):
         """Test searching the knowledge base."""
         # Write
-        kb_id = await memory.add_knowledge("Python is a programming language", source="docs")
+        await memory.add_knowledge("Python is a programming language", source="docs")
 
         # Search
         results = await memory.search_knowledge("programming", k=1)

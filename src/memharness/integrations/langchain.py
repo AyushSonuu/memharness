@@ -393,7 +393,7 @@ class MemharnessMemory(BaseChatMemory):
             The result of the coroutine.
         """
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             # No running loop, create one
             return asyncio.run(coro)

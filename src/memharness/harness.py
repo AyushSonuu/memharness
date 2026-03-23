@@ -173,10 +173,10 @@ class MemharnessConfig:
                 import yaml
 
                 data = yaml.safe_load(content)
-            except ImportError:
+            except ImportError as exc:
                 raise ImportError(
                     "PyYAML is required to load YAML config files. Install with: pip install pyyaml"
-                )
+                ) from exc
         else:
             data = json.loads(content)
 
@@ -373,7 +373,7 @@ class InMemoryBackend:
         if len(a) != len(b):
             return 0.0
 
-        dot_product = sum(x * y for x, y in zip(a, b))
+        dot_product = sum(x * y for x, y in zip(a, b, strict=False))
         norm_a = sum(x * x for x in a) ** 0.5
         norm_b = sum(x * x for x in b) ** 0.5
 
@@ -417,20 +417,20 @@ def _parse_backend(backend_uri: str) -> BackendProtocol:
             from memharness.backends.sqlite import SqliteBackend
 
             return SqliteBackend(db_path)
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "SqliteBackend is not available. Ensure the sqlite backend module is installed."
-            )
+            ) from exc
 
     if backend_uri.startswith("postgresql://") or backend_uri.startswith("postgres://"):
         try:
             from memharness.backends.postgres import PostgresBackend
 
             return PostgresBackend(backend_uri)
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "PostgresBackend is not available. Install with: pip install memharness[postgres]"
-            )
+            ) from exc
 
     raise ValueError(
         f"Unrecognized backend URI: {backend_uri}. "
@@ -585,8 +585,8 @@ class MemoryHarness:
                 import yaml
 
                 data = yaml.safe_load(content)
-            except ImportError:
-                raise ImportError("PyYAML required for YAML configs: pip install pyyaml")
+            except ImportError as exc:
+                raise ImportError("PyYAML required for YAML configs: pip install pyyaml") from exc
         else:
             data = json.loads(content)
 

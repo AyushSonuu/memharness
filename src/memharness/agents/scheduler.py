@@ -248,7 +248,7 @@ class AgentScheduler:
 
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for name, result in zip(self.enabled_agents, task_results):
+            for name, result in zip(self.enabled_agents, task_results, strict=False):
                 if isinstance(result, Exception):
                     results[name] = {"error": str(result), "success": False}
                 else:

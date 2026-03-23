@@ -28,7 +28,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from memharness.backends.protocol import BackendProtocol
 from memharness.backends.sqlite import SqliteBackend

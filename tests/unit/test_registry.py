@@ -137,7 +137,7 @@ class TestRegistryGet:
         assert handler1 is not None
         assert handler2 is not None
         # They should be the same handler
-        assert type(handler1) == type(handler2)
+        assert type(handler1) is type(handler2)
 
     def test_get_invalid_type(self):
         """Test getting unregistered type raises appropriate error."""

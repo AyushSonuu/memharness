@@ -215,7 +215,7 @@ class ConsolidatorAgent(EmbeddedAgent):
             by_type[mem_type].append(memory)
 
         # Compare within each type
-        for mem_type, type_memories in by_type.items():
+        for _mem_type, type_memories in by_type.items():
             n = len(type_memories)
             for i in range(n):
                 for j in range(i + 1, n):
@@ -404,9 +404,9 @@ Respond with ONLY a number between 0.0 and 1.0."""
         # memory_b = await self.memory.get(memory_b_id)
 
         if self.has_llm:
-            merged_content = await self._merge_with_llm(memory_a_id, memory_b_id)
+            await self._merge_with_llm(memory_a_id, memory_b_id)
         else:
-            merged_content = await self._merge_heuristic(memory_a_id, memory_b_id)
+            await self._merge_heuristic(memory_a_id, memory_b_id)
 
         # Update memory_a with merged content
         # await self.memory.update(
