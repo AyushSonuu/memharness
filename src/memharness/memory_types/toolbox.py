@@ -78,6 +78,26 @@ class ToolboxMixin(BaseMixin):
             "parameters": parameters,
         }
 
+        # Dedup: check if tool already exists by name
+        existing = await self._backend.search(
+            query_embedding=embedding,
+            memory_type=MemoryType.TOOLBOX,
+            namespace=namespace,
+            k=5,
+        )
+        for e in existing:
+            if e.metadata.get("tool_name") == tool_name and e.metadata.get("server") == server:
+                # Update existing tool instead of creating duplicate
+                await self._backend.update(
+                    e.id,
+                    {
+                        "content": content,
+                        "metadata": meta,
+                        "embedding": embedding,
+                    },
+                )
+                return e.id
+
         unit = self._create_unit(
             content=content,
             memory_type=MemoryType.TOOLBOX,
