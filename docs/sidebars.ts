@@ -52,6 +52,13 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Middleware',
+      items: [
+        'middleware/overview',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Memory Tools',
       items: [
         'tools/overview',

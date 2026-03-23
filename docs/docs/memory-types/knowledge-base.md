@@ -349,5 +349,5 @@ await add_knowledge_batch([
 ## Next Steps
 
 - [Entity Memory](./entity) — Structured named entities
-- [RAG Guide](../concepts/rag) — Building RAG applications
-- [Embeddings](../concepts/embeddings) — Choosing embedding models
+- [RAG Guide](../concepts/memory-types) — Building RAG applications
+- [Embeddings](../concepts/configuration) — Choosing embedding models
