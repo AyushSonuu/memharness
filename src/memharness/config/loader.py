@@ -34,7 +34,7 @@ class ConfigLoadError(Exception):
     pass
 
 
-class DurationParseError(Exception):
+class DurationParseError(ValueError):
     """Raised when duration string parsing fails."""
 
     pass
@@ -62,11 +62,11 @@ _DURATION_UNITS: dict[str, int] = {
     "weeks": 604800,
 }
 
-# Pattern for parsing duration strings
-_DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$", re.IGNORECASE)
+# Pattern for parsing single duration segments
+_DURATION_SEGMENT = re.compile(r"(\d+(?:\.\d+)?)\s*([a-zA-Z]+)", re.IGNORECASE)
 
 
-def parse_duration(duration_str: str) -> timedelta:
+def parse_duration(duration_str: str) -> timedelta | None:
     """Parse a duration string into a timedelta.
 
     Supports various formats:
@@ -75,44 +75,72 @@ def parse_duration(duration_str: str) -> timedelta:
     - Hours: "2h", "2hr", "2 hours"
     - Days: "7d", "7day", "7 days"
     - Weeks: "1w", "1week", "1 weeks"
+    - Combined: "1d12h", "2h30m"
+    - Special: "never" (returns None, meaning infinite/no expiry)
 
     Args:
-        duration_str: Duration string to parse (e.g., "7d", "24h", "30m")
+        duration_str: Duration string to parse (e.g., "7d", "24h", "30m", "never")
 
     Returns:
-        timedelta representing the duration
+        timedelta representing the duration, or None for "never"
 
     Raises:
         DurationParseError: If the duration string cannot be parsed
+        ValueError: If the duration is negative
 
     Examples:
         >>> parse_duration("7d")
         datetime.timedelta(days=7)
         >>> parse_duration("24h")
         datetime.timedelta(days=1)
-        >>> parse_duration("30m")
-        datetime.timedelta(seconds=1800)
+        >>> parse_duration("1d12h")
+        datetime.timedelta(days=1, seconds=43200)
+        >>> parse_duration("never")
+        None
     """
     if not duration_str or not isinstance(duration_str, str):
         raise DurationParseError(f"Invalid duration: {duration_str!r}")
 
-    match = _DURATION_PATTERN.match(duration_str)
-    if not match:
+    stripped = duration_str.strip().lower()
+
+    # Special value: "never" means infinite retention
+    if stripped == "never":
+        return None
+
+    # Check for negative values
+    if stripped.startswith("-"):
+        raise ValueError(f"Negative duration not allowed: {duration_str!r}")
+
+    # Find all segments (e.g., "1d12h" -> [("1", "d"), ("12", "h")])
+    segments = _DURATION_SEGMENT.findall(stripped)
+
+    if not segments:
         raise DurationParseError(
             f"Cannot parse duration: {duration_str!r}. "
-            "Expected format like '7d', '24h', '30m', '60s'"
+            "Expected format like '7d', '24h', '30m', '60s', '1d12h', or 'never'"
         )
 
-    value_str, unit = match.groups()
-    value = float(value_str)
-    unit_lower = unit.lower()
+    total_seconds = 0.0
+    for value_str, unit in segments:
+        value = float(value_str)
+        unit_lower = unit.lower()
 
-    if unit_lower not in _DURATION_UNITS:
-        valid_units = ", ".join(sorted(set(_DURATION_UNITS.keys())))
-        raise DurationParseError(f"Unknown duration unit: {unit!r}. Valid units: {valid_units}")
+        if unit_lower not in _DURATION_UNITS:
+            valid_units = ", ".join(sorted(set(_DURATION_UNITS.keys())))
+            raise DurationParseError(f"Unknown duration unit: {unit!r}. Valid units: {valid_units}")
 
-    seconds = value * _DURATION_UNITS[unit_lower]
-    return timedelta(seconds=seconds)
+        total_seconds += value * _DURATION_UNITS[unit_lower]
+
+    # Verify nothing extra in the string (reject "7d garbage")
+    reconstructed = "".join(f"{v}{u}" for v, u in segments)
+    cleaned = re.sub(r"\s+", "", stripped)
+    if cleaned != reconstructed:
+        raise DurationParseError(
+            f"Cannot parse duration: {duration_str!r}. "
+            "Expected format like '7d', '24h', '30m', '60s', '1d12h', or 'never'"
+        )
+
+    return timedelta(seconds=total_seconds)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -207,7 +235,7 @@ def from_yaml(path: str | Path) -> MemharnessConfig:
     path = Path(path)
 
     if not path.exists():
-        raise ConfigLoadError(f"Configuration file not found: {path}")
+        raise FileNotFoundError(f"Configuration file not found: {path}")
 
     if not path.is_file():
         raise ConfigLoadError(f"Configuration path is not a file: {path}")

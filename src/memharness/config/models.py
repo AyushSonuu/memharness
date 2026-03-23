@@ -226,7 +226,7 @@ class MemharnessConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     backend: str = Field(
-        default="sqlite:///memharness.db",
+        default="memory://",
         description="Backend connection string (e.g., 'postgresql://...', 'sqlite://...')",
     )
     memory_types: MemoryTypesConfig = Field(default_factory=MemoryTypesConfig)
@@ -245,6 +245,22 @@ class MemharnessConfig(BaseModel):
     def connection_string(self) -> str:
         """Alias for backend field for backward compatibility."""
         return self.backend
+
+    @property
+    def memory(self) -> MemoryTypesConfig:
+        """Alias for memory_types for backward compatibility."""
+        return self.memory_types
+
+    @property
+    def retention(self) -> dict[str, str | None]:
+        """Get retention settings for all memory types.
+
+        Returns a dict mapping memory type names to their TTL settings.
+        """
+        conversational_ttl = self.memory_types.conversational.default_ttl
+        return {
+            "conversational": conversational_ttl,
+        }
 
     @classmethod
     def from_yaml(cls, path):
