@@ -90,12 +90,20 @@ class ConversationMiddleware(AgentMiddleware):
         return None
 
 
-# ── AFTER middleware: handle entity extraction + workflow saving ────
+# ── AFTER middleware: invokes the LangGraph workflow from package ────
+from memharness.agents.agent_workflow import create_after_workflow
+
 class AfterMiddleware(AgentMiddleware):
+    """Wraps the packaged LangGraph workflow as a LangChain AFTER middleware.
+    
+    The workflow runs: save_response → extract_entities → save_workflow → check_summarization
+    """
     def __init__(self, harness, thread_id):
         super().__init__()
         self.harness = harness
         self.thread_id = thread_id
+        self._graph = create_after_workflow(harness)
+        self._steps = []
 
     async def abefore_model(self, state, runtime):
         return None
@@ -103,18 +111,27 @@ class AfterMiddleware(AgentMiddleware):
     async def aafter_model(self, state, runtime):
         msgs = state.get("messages", [])
         last = msgs[-1] if msgs else None
+
+        # Track tool calls
+        if hasattr(last, "tool_calls") and last.tool_calls:
+            for tc in last.tool_calls:
+                self._steps.append(f"{tc.get('name', '?')}()")
+            return None
+
+        # Final answer — run the LangGraph workflow
         if not isinstance(last, AIMessage) or not last.content:
             return None
-        # Extract entities (regex, no LLM)
-        try:
-            from memharness.agents import EntityExtractorAgent
-            ext = EntityExtractorAgent(self.harness)
-            entities = await ext.extract_entities(last.content)
-            for cat, names in entities.items():
-                for name in names:
-                    await self.harness.add_entity(name, cat, f"{cat}: {name}")
-        except Exception:
-            pass
+
+        await self._graph.ainvoke({
+            "messages": msgs,
+            "thread_id": self.thread_id,
+            "response_text": last.content,
+            "steps": self._steps,
+            "entities_extracted": 0,
+            "workflow_saved": False,
+            "summarized": False,
+        })
+        self._steps = []
         return None
 
 

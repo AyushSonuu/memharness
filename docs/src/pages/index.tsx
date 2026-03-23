@@ -164,7 +164,7 @@ agent = create_agent(
     tools=get_read_tools(harness),       # 5 read-only tools
     middleware=[
         ContextMiddleware(harness, thread_id),          # BEFORE: context + save msgs
-        # Add your own AFTER middleware for entities + workflow (see docs)
+        # AfterMiddleware wraps create_after_workflow (see docs)
     ],
 )
 
