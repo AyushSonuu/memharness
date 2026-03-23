@@ -3,365 +3,445 @@
 # Licensed under MIT License
 
 """
-Tool definitions for memory exploration.
+LangChain-based tool definitions for memory exploration.
 
-This module defines the tool schemas that can be provided to AI agents,
-allowing them to explore and manage their own memory.
+This module provides LangChain BaseTool subclasses that agents can use to
+explore and manage their own memory. Each tool wraps operations from
+MemoryHarness in a standard LangChain tool interface.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+try:
+    from langchain_core.tools import BaseTool
+    from pydantic import BaseModel, Field
+
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    BaseTool = object  # type: ignore[misc, assignment]
+    BaseModel = object  # type: ignore[misc, assignment]
+
+    def Field(*args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+        """Stub for Field when pydantic is not available."""
+        return None
+
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
 
 
-def get_memory_tools(memory: MemoryHarness) -> list[dict]:
+__all__ = [
+    "MemorySearchTool",
+    "MemoryReadTool",
+    "MemoryWriteTool",
+    "MemoryStatsTool",
+    "ToolboxTreeTool",
+    "ToolboxGrepTool",
+    "get_memory_tools",
+    "LANGCHAIN_AVAILABLE",
+]
+
+
+# =============================================================================
+# Pydantic Input Schemas
+# =============================================================================
+
+
+class MemorySearchInput(BaseModel):
+    """Input schema for memory search."""
+
+    query: str = Field(description="Natural language search query")
+    memory_type: str | None = Field(
+        default=None,
+        description="Type of memory to search (conversational, knowledge_base, entity, etc.)",
+    )
+    k: int = Field(default=5, description="Number of results to return (1-20)")
+
+
+class MemoryReadInput(BaseModel):
+    """Input schema for memory read."""
+
+    memory_id: str = Field(description="The unique identifier of the memory to read")
+
+
+class MemoryWriteInput(BaseModel):
+    """Input schema for memory write."""
+
+    memory_type: str = Field(
+        description="Type of memory (knowledge_base, entity, workflow, or skills)"
+    )
+    content: str = Field(description="The content to store in memory")
+    metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata to attach")
+
+
+class MemoryStatsInput(BaseModel):
+    """Input schema for memory stats (no parameters)."""
+
+    pass
+
+
+class ToolboxTreeInput(BaseModel):
+    """Input schema for toolbox tree."""
+
+    path: str = Field(default="/", description="Path to start the tree from")
+    depth: int = Field(default=3, description="Maximum depth to display (1-5)")
+
+
+class ToolboxGrepInput(BaseModel):
+    """Input schema for toolbox grep."""
+
+    pattern: str = Field(description="Regex pattern to search for in tool names and descriptions")
+    case_sensitive: bool = Field(default=False, description="Whether the search is case-sensitive")
+
+
+# =============================================================================
+# Tool Classes
+# =============================================================================
+
+
+class MemorySearchTool(BaseTool):
     """
-    Returns tool definitions that agents can use to explore their memory.
+    Search across memory types using semantic similarity.
 
-    These definitions follow the OpenAI/Anthropic tool calling format and can
-    be directly passed to most LLM APIs.
+    This tool allows agents to search their memory for relevant information
+    using natural language queries.
+    """
 
-    Tools:
-        1. memory_search - Search across memory types using semantic similarity
-        2. memory_read - Read specific memory by ID
-        3. memory_write - Write new memory to a specific type
-        4. memory_stats - Get memory statistics and usage
-        5. memory_list - List memories by type with pagination
-        6. toolbox_tree - VFS tree view of available tools
-        7. toolbox_ls - List tools in a specific server
-        8. toolbox_grep - Search tools by pattern
-        9. toolbox_cat - Get detailed tool schema
-        10. summary_expand - Expand a summary to original messages
+    name: str = "memory_search"
+    description: str = (
+        "Search your memory for relevant information using semantic similarity. "
+        "Returns the most relevant memories matching your query. "
+        "Use this when you need to recall something but don't know the exact ID."
+    )
+    args_schema: type[BaseModel] = MemorySearchInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(
+        self,
+        query: str,
+        memory_type: str | None = None,
+        k: int = 5,
+    ) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(
+        self,
+        query: str,
+        memory_type: str | None = None,
+        k: int = 5,
+    ) -> str:
+        """
+        Execute memory search.
+
+        Args:
+            query: Natural language search query.
+            memory_type: Optional type to filter by.
+            k: Number of results to return.
+
+        Returns:
+            Formatted search results.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute("memory_search", query=query, memory_type=memory_type, k=k)
+
+
+class MemoryReadTool(BaseTool):
+    """
+    Read a specific memory by its ID.
+
+    This tool allows agents to retrieve detailed information about a
+    specific memory when they have its ID.
+    """
+
+    name: str = "memory_read"
+    description: str = (
+        "Read a specific memory by its ID. "
+        "Use this when you have a memory ID from a previous search or reference."
+    )
+    args_schema: type[BaseModel] = MemoryReadInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, memory_id: str) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, memory_id: str) -> str:
+        """
+        Execute memory read.
+
+        Args:
+            memory_id: The memory's unique identifier.
+
+        Returns:
+            Formatted memory content.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute("memory_read", memory_id=memory_id)
+
+
+class MemoryWriteTool(BaseTool):
+    """
+    Write new information to memory.
+
+    This tool allows agents to persist important facts, learnings,
+    or observations to their memory.
+    """
+
+    name: str = "memory_write"
+    description: str = (
+        "Write new information to memory. "
+        "Use this to persist important facts, learnings, or observations."
+    )
+    args_schema: type[BaseModel] = MemoryWriteInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(
+        self,
+        memory_type: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(
+        self,
+        memory_type: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Execute memory write.
+
+        Args:
+            memory_type: Type of memory to write.
+            content: Content to store.
+            metadata: Optional metadata.
+
+        Returns:
+            Confirmation with memory ID.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute(
+            "memory_write", memory_type=memory_type, content=content, metadata=metadata
+        )
+
+
+class MemoryStatsTool(BaseTool):
+    """
+    Get memory statistics and usage information.
+
+    This tool provides agents with insights into their memory usage,
+    showing counts, sizes, and health metrics for each memory type.
+    """
+
+    name: str = "memory_stats"
+    description: str = (
+        "Get statistics about your memory usage. "
+        "Shows counts, sizes, and health metrics for each memory type."
+    )
+    args_schema: type[BaseModel] = MemoryStatsInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self) -> str:
+        """
+        Execute memory stats.
+
+        Returns:
+            Formatted statistics overview.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute("memory_stats")
+
+
+class ToolboxTreeTool(BaseTool):
+    """
+    Display a tree view of available tools.
+
+    This tool shows agents a hierarchical view of all available
+    tools in their toolbox, organized by server/category.
+    """
+
+    name: str = "toolbox_tree"
+    description: str = (
+        "Display a tree view of available tools in your toolbox. "
+        "Shows tools organized by server/category in a hierarchical view."
+    )
+    args_schema: type[BaseModel] = ToolboxTreeInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, path: str = "/", depth: int = 3) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, path: str = "/", depth: int = 3) -> str:
+        """
+        Execute toolbox tree.
+
+        Args:
+            path: Starting path.
+            depth: Max depth.
+
+        Returns:
+            Formatted tree.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute("toolbox_tree", path=path, depth=depth)
+
+
+class ToolboxGrepTool(BaseTool):
+    """
+    Search for tools by name or description pattern.
+
+    This tool allows agents to search for specific tools when they
+    know part of a tool name or what it does.
+    """
+
+    name: str = "toolbox_grep"
+    description: str = (
+        "Search for tools by name or description pattern. "
+        "Useful when you know part of a tool name or what it does."
+    )
+    args_schema: type[BaseModel] = ToolboxGrepInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, pattern: str, case_sensitive: bool = False) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, pattern: str, case_sensitive: bool = False) -> str:
+        """
+        Execute toolbox grep.
+
+        Args:
+            pattern: Regex pattern.
+            case_sensitive: Match case.
+
+        Returns:
+            Matching tools.
+        """
+        from memharness.tools.executor import MemoryToolExecutor
+
+        executor = MemoryToolExecutor(self.harness)
+        return await executor.execute(
+            "toolbox_grep", pattern=pattern, case_sensitive=case_sensitive
+        )
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
+    """
+    Get all memory tools for a given harness instance.
+
+    This function creates and returns a list of all available memory tools,
+    each configured to use the provided MemoryHarness instance.
 
     Args:
-        memory: The MemoryHarness instance to create tools for.
-                Currently unused but reserved for future dynamic tool generation.
+        harness: The MemoryHarness instance to create tools for.
 
     Returns:
-        List of tool definition dictionaries in standard format.
+        List of BaseTool instances.
+
+    Raises:
+        ImportError: If langchain-core is not installed.
 
     Example:
-        >>> tools = get_memory_tools(memory_harness)
-        >>> # Pass to your LLM API
-        >>> response = llm.generate(messages, tools=tools)
+        >>> from memharness import MemoryHarness
+        >>> from memharness.tools import get_memory_tools
+        >>>
+        >>> harness = MemoryHarness("sqlite:///memory.db")
+        >>> tools = get_memory_tools(harness)
+        >>>
+        >>> # Use with LangChain agent
+        >>> from langchain.agents import AgentExecutor
+        >>> agent = AgentExecutor(tools=tools, ...)
     """
+    if not LANGCHAIN_AVAILABLE:
+        raise ImportError(
+            "langchain-core is required for memory tools. Install with: pip install langchain-core"
+        )
+
     return [
-        # Memory Search
-        {
-            "name": "memory_search",
-            "description": (
-                "Search your memory for relevant information using semantic similarity. "
-                "Returns the most relevant memories matching your query. "
-                "Use this when you need to recall something but don't know the exact ID."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language search query describing what you're looking for",
-                    },
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "conversational",
-                            "knowledge_base",
-                            "entity",
-                            "workflow",
-                            "skills",
-                            "toolbox",
-                            "summary",
-                            "tool_log",
-                            "file",
-                            "persona",
-                        ],
-                        "description": "Type of memory to search. If not specified, searches all types.",
-                    },
-                    "k": {
-                        "type": "integer",
-                        "default": 5,
-                        "description": "Number of results to return (1-20)",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-        # Memory Read
-        {
-            "name": "memory_read",
-            "description": (
-                "Read a specific memory by its ID. "
-                "Use this when you have a memory ID from a previous search or reference."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_id": {
-                        "type": "string",
-                        "description": "The unique identifier of the memory to read",
-                    },
-                },
-                "required": ["memory_id"],
-            },
-        },
-        # Memory Write
-        {
-            "name": "memory_write",
-            "description": (
-                "Write new information to memory. "
-                "Use this to persist important facts, learnings, or observations."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "knowledge_base",
-                            "entity",
-                            "workflow",
-                            "skills",
-                        ],
-                        "description": (
-                            "Type of memory to write to. "
-                            "knowledge_base: General facts and information. "
-                            "entity: Information about specific people, organizations, or things. "
-                            "workflow: Procedures, processes, and how-to information. "
-                            "skills: Learned capabilities and techniques."
-                        ),
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "The content to store in memory",
-                    },
-                    "metadata": {
-                        "type": "object",
-                        "description": "Optional metadata to attach (e.g., source, tags, confidence)",
-                    },
-                },
-                "required": ["memory_type", "content"],
-            },
-        },
-        # Memory Stats
-        {
-            "name": "memory_stats",
-            "description": (
-                "Get statistics about your memory usage. "
-                "Shows counts, sizes, and health metrics for each memory type."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-        # Memory List
-        {
-            "name": "memory_list",
-            "description": (
-                "List memories of a specific type with pagination. "
-                "Use this to browse memories without searching."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "conversational",
-                            "knowledge_base",
-                            "entity",
-                            "workflow",
-                            "skills",
-                            "toolbox",
-                            "summary",
-                            "tool_log",
-                            "file",
-                            "persona",
-                        ],
-                        "description": "Type of memory to list",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Maximum number of results (1-50)",
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Number of results to skip for pagination",
-                    },
-                    "order_by": {
-                        "type": "string",
-                        "enum": ["created_at", "updated_at", "relevance"],
-                        "default": "created_at",
-                        "description": "Field to sort by",
-                    },
-                },
-                "required": ["memory_type"],
-            },
-        },
-        # Toolbox Tree
-        {
-            "name": "toolbox_tree",
-            "description": (
-                "Display a tree view of available tools in your toolbox. "
-                "Shows tools organized by server/category in a hierarchical view."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "default": "/",
-                        "description": "Path to start the tree from (e.g., '/' for root, '/mcp/filesystem')",
-                    },
-                    "depth": {
-                        "type": "integer",
-                        "default": 3,
-                        "description": "Maximum depth to display (1-5)",
-                    },
-                },
-                "required": [],
-            },
-        },
-        # Toolbox List
-        {
-            "name": "toolbox_ls",
-            "description": (
-                "List tools in a specific server or category. "
-                "Similar to 'ls' command for exploring your toolbox."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "server": {
-                        "type": "string",
-                        "description": "Server name to list tools from (e.g., 'filesystem', 'github')",
-                    },
-                    "verbose": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Include tool descriptions in output",
-                    },
-                },
-                "required": [],
-            },
-        },
-        # Toolbox Grep
-        {
-            "name": "toolbox_grep",
-            "description": (
-                "Search for tools by name or description pattern. "
-                "Useful when you know part of a tool name or what it does."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to search for in tool names and descriptions",
-                    },
-                    "case_sensitive": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Whether the search is case-sensitive",
-                    },
-                },
-                "required": ["pattern"],
-            },
-        },
-        # Toolbox Cat
-        {
-            "name": "toolbox_cat",
-            "description": (
-                "Get the full schema and documentation for a specific tool. "
-                "Shows parameters, types, and usage examples."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tool_name": {
-                        "type": "string",
-                        "description": "Name of the tool to get details for",
-                    },
-                    "server": {
-                        "type": "string",
-                        "description": "Server the tool belongs to (if ambiguous)",
-                    },
-                },
-                "required": ["tool_name"],
-            },
-        },
-        # Summary Expand
-        {
-            "name": "summary_expand",
-            "description": (
-                "Expand a conversation summary to see the original messages. "
-                "Use this when you need full context from a summarized conversation."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "summary_id": {
-                        "type": "string",
-                        "description": "ID of the summary to expand",
-                    },
-                    "include_metadata": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Include message metadata (timestamps, token counts)",
-                    },
-                },
-                "required": ["summary_id"],
-            },
-        },
-    ]
-
-
-def get_memory_tools_anthropic(memory: MemoryHarness) -> list[dict]:
-    """
-    Returns tool definitions in Anthropic's Claude format.
-
-    Anthropic uses a slightly different schema with 'input_schema' instead
-    of 'parameters'.
-
-    Args:
-        memory: The MemoryHarness instance.
-
-    Returns:
-        List of tool definitions in Anthropic format.
-    """
-    tools = get_memory_tools(memory)
-    return [
-        {
-            "name": tool["name"],
-            "description": tool["description"],
-            "input_schema": tool["parameters"],
-        }
-        for tool in tools
-    ]
-
-
-def get_tool_names() -> list[str]:
-    """
-    Returns a list of all available memory tool names.
-
-    Returns:
-        List of tool name strings.
-    """
-    return [
-        "memory_search",
-        "memory_read",
-        "memory_write",
-        "memory_stats",
-        "memory_list",
-        "toolbox_tree",
-        "toolbox_ls",
-        "toolbox_grep",
-        "toolbox_cat",
-        "summary_expand",
+        MemorySearchTool(harness=harness),
+        MemoryReadTool(harness=harness),
+        MemoryWriteTool(harness=harness),
+        MemoryStatsTool(harness=harness),
+        ToolboxTreeTool(harness=harness),
+        ToolboxGrepTool(harness=harness),
     ]

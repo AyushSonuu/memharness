@@ -5,81 +5,23 @@ slug: /
 
 # Introduction
 
-**memharness** is a framework-agnostic memory infrastructure layer for AI agents. It provides everything you need to give your agents persistent, searchable, typed memory.
+**memharness** is a framework-agnostic Python package that provides complete memory infrastructure for AI agents. It enables any agent framework — LangChain, LangGraph, CrewAI, Deep Agents, or custom — to have persistent, searchable, typed memory with built-in lifecycle management.
 
 ## Why memharness?
 
-AI agents are **stateless by default** — brilliant in one conversation, blank slate the next. memharness treats memory as **infrastructure**: external, persistent, and structured.
+Most agent frameworks treat memory as an afterthought. memharness makes it a first-class concern:
 
+- **Typed memories** — 10 distinct memory types, each optimized for its use case
+- **Any backend** — PostgreSQL, SQLite, or in-memory, swappable with one line
+- **Lifecycle management** — Automated summarization, consolidation, and garbage collection
+- **Agent tools** — Agents can explore and manage their own memory
+- **Framework agnostic** — Works with any Python agent framework
+
+## Install
+
+```bash
+pip install memharness
 ```
-┌─────────────────────────────────────┐
-│         YOUR AGENT                   │
-│  (LangChain | CrewAI | Custom)      │
-└───────────────┬─────────────────────┘
-                │
-                ▼
-┌─────────────────────────────────────┐
-│           memharness                 │  ← Memory Infrastructure
-│  • 10 Memory Types                   │
-│  • Deterministic + AI Operations     │
-│  • Self-Exploration Tools            │
-└───────────────┬─────────────────────┘
-                │
-                ▼
-┌─────────────────────────────────────┐
-│  PostgreSQL | SQLite | In-Memory    │
-└─────────────────────────────────────┘
-```
-
-## Key Features
-
-### 🧠 10 Memory Types
-
-| Type | Purpose |
-|------|---------|
-| **Conversational** | Chat history per thread |
-| **Knowledge Base** | Documents, facts, reference material |
-| **Entity** | People, organizations, systems |
-| **Workflow** | Reusable step-by-step patterns |
-| **Toolbox** | Tool definitions with VFS discovery |
-| **Summary** | Compressed conversations (expandable) |
-| **Tool Log** | Tool execution audit trail |
-| **Skills** | Learned agent capabilities |
-| **File** | Document references |
-| **Persona** | Agent identity blocks |
-
-### ⚡ Deterministic + AI Operations
-
-Simple operations are **deterministic** (no AI needed). Complex operations use **embedded agents**.
-
-```python
-# DETERMINISTIC — direct to storage
-await memory.add_conversational(thread_id, role, content)
-await memory.search_knowledge(query)
-
-# AI-ASSISTED — when intelligence needed
-await memory.extract_entities(content)  # Uses LLM
-await memory.summarize(thread_id)       # Uses LLM
-```
-
-### 🔧 Self-Exploration Tools
-
-Agents can explore and manage their own memory:
-
-```python
-tools = memory.get_memory_tools()
-# memory_search, memory_stats, toolbox_tree, toolbox_grep, etc.
-```
-
-### 📦 Multiple Backends
-
-- **PostgreSQL + pgvector** — Production-grade
-- **SQLite** — Development and local use
-- **In-memory** — Testing
-
-### 🔌 Framework Integrations
-
-Works with LangChain, LangGraph, CrewAI, or any custom agent.
 
 ## Quick Example
 
@@ -87,19 +29,41 @@ Works with LangChain, LangGraph, CrewAI, or any custom agent.
 from memharness import MemoryHarness
 
 async with MemoryHarness("sqlite:///memory.db") as memory:
-    # Write
-    await memory.add_conversational("t1", "user", "Deploy to K8s")
-    await memory.add_knowledge("K8s guide...", source="docs")
+    # Store conversational memory
+    await memory.add_conversational("thread1", "user", "What is Python?")
+    await memory.add_conversational("thread1", "assistant", "Python is a programming language.")
 
-    # Search
-    results = await memory.search_knowledge("kubernetes")
+    # Store knowledge
+    await memory.add_knowledge(
+        "Python supports async/await since version 3.5",
+        source="python-docs",
+    )
+
+    # Semantic search
+    results = await memory.search_knowledge("async programming")
 
     # Assemble context for LLM
-    context = await memory.assemble_context("deploy app", "t1")
+    context = await memory.assemble_context("Tell me about async", "thread1")
 ```
+
+## Memory Types
+
+| Type | Purpose | Storage |
+|------|---------|---------|
+| **Conversational** | Chat history per thread | SQL (ordered) |
+| **Knowledge** | Facts, docs, reference material | Vector (semantic) |
+| **Entity** | People, orgs, systems, concepts | Vector |
+| **Workflow** | Step-by-step procedures | Vector |
+| **Toolbox** | Tool definitions with VFS discovery | Vector |
+| **Summary** | Compressed memories (expandable) | Vector |
+| **Tool Log** | Tool execution audit trail | SQL (ordered) |
+| **Skills** | Learned agent capabilities | Vector |
+| **File** | Document references | Vector |
+| **Persona** | Agent identity and style | Vector |
 
 ## Next Steps
 
-- [Getting Started](./getting-started) — Install and basic usage
-- [Memory Types](./concepts/memory-types) — Understanding the 10 types
-- [API Reference](./api/harness) — Full API documentation
+- [Getting Started](./getting-started) — Full setup guide
+- [Memory Types](./memory-types/conversational) — Deep dive into each type
+- [API Reference](./api/harness) — Complete API docs
+- [Backends](./backends/sqlite) — Backend configuration
