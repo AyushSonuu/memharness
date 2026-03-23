@@ -443,6 +443,7 @@ class ToolboxSearchTool(BaseTool):
         except Exception as e:
             return f"Error searching tools: {e}"
 
+
 class ExpandSummaryTool(BaseTool):
     """
     Expand a compacted summary back to its full original content.
