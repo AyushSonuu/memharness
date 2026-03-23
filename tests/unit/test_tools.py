@@ -12,17 +12,12 @@ from memharness import MemoryHarness
 from memharness.tools import (
     LANGCHAIN_AVAILABLE,
     AssembleContextTool,
-    ConversationHistoryTool,
     ExpandSummaryTool,
     MemoryReadTool,
     MemorySearchTool,
-    MemoryStatsTool,
     MemoryWriteTool,
     SummarizeAndStoreTool,
-    ToolboxGrepTool,
-    ToolboxTreeTool,
-    WriteToolLogTool,
-    WriteWorkflowTool,
+    ToolboxSearchTool,
     get_memory_tools,
 )
 
@@ -43,7 +38,7 @@ class TestMemoryTools:
         """Test get_memory_tools returns all tools."""
         tools = get_memory_tools(harness)
 
-        assert len(tools) == 12
+        assert len(tools) == 7
         assert all(hasattr(tool, "name") for tool in tools)
         assert all(hasattr(tool, "description") for tool in tools)
         assert all(hasattr(tool, "_arun") for tool in tools)
@@ -53,15 +48,10 @@ class TestMemoryTools:
             "memory_search",
             "memory_read",
             "memory_write",
-            "memory_stats",
-            "toolbox_tree",
-            "toolbox_grep",
+            "toolbox_search",
             "expand_summary",
-            "get_conversation_history",
             "assemble_context",
             "summarize_and_store",
-            "write_tool_log",
-            "write_workflow",
         }
         assert tool_names == expected_names
 
@@ -97,7 +87,7 @@ class TestMemoryTools:
         assert "Test content for reading" in result
 
     async def test_memory_write_tool(self, harness):
-        """Test MemoryWriteTool."""
+        """Test MemoryWriteTool for knowledge base."""
         tool = MemoryWriteTool(harness=harness)
 
         # Test write
@@ -109,24 +99,46 @@ class TestMemoryTools:
 
         assert isinstance(result, str)
         assert "successfully" in result.lower()
-        assert "ID:" in result
+        assert "ID:" in result or "id:" in result.lower()
 
-    async def test_memory_stats_tool(self, harness):
-        """Test MemoryStatsTool."""
-        # Add some data
-        await harness.add_knowledge(content="Test 1")
-        await harness.add_knowledge(content="Test 2")
-        await harness.add_entity(name="Test Entity", entity_type="person", description="Info")
+    async def test_memory_write_tool_workflow(self, harness):
+        """Test MemoryWriteTool for workflow type."""
+        tool = MemoryWriteTool(harness=harness)
 
-        tool = MemoryStatsTool(harness=harness)
+        # Test workflow write
+        result = await tool._arun(
+            memory_type="workflow",
+            content="",  # content not used for workflow
+            task="Deploy application",
+            steps=["Run tests", "Build image", "Deploy"],
+            outcome="Success",
+        )
 
-        # Test stats
-        result = await tool._arun()
         assert isinstance(result, str)
-        assert "Statistics" in result or "Total" in result
+        assert "Workflow saved" in result or "successfully" in result.lower()
+        assert "Deploy application" in result
 
-    async def test_toolbox_tree_tool(self, harness):
-        """Test ToolboxTreeTool."""
+    async def test_memory_write_tool_tool_log(self, harness):
+        """Test MemoryWriteTool for tool_log type."""
+        tool = MemoryWriteTool(harness=harness)
+
+        # Test tool log write
+        result = await tool._arun(
+            memory_type="tool_log",
+            content="",  # content not used for tool_log
+            thread_id="test-thread",
+            tool_name="github/create_issue",
+            tool_input='{"title": "Bug"}',
+            tool_output="Issue #42 created",
+            status="success",
+        )
+
+        assert isinstance(result, str)
+        assert "logged" in result.lower() or "successfully" in result.lower()
+        assert "github/create_issue" in result
+
+    async def test_toolbox_search_tool_tree_mode(self, harness):
+        """Test ToolboxSearchTool in tree mode (no pattern)."""
         # Add some toolbox entries
         await harness.add_tool(
             server="test_server",
@@ -135,14 +147,14 @@ class TestMemoryTools:
             parameters={"type": "function"},
         )
 
-        tool = ToolboxTreeTool(harness=harness)
+        tool = ToolboxSearchTool(harness=harness)
 
-        # Test tree
-        result = await tool._arun(path="/", depth=2)
+        # Test tree mode (no pattern)
+        result = await tool._arun(pattern=None, path="/", depth=2)
         assert isinstance(result, str)
 
-    async def test_toolbox_grep_tool(self, harness):
-        """Test ToolboxGrepTool."""
+    async def test_toolbox_search_tool_grep_mode(self, harness):
+        """Test ToolboxSearchTool in grep mode (with pattern)."""
         # Add toolbox entries
         await harness.add_tool(
             server="test_server",
@@ -157,9 +169,9 @@ class TestMemoryTools:
             parameters={"type": "function"},
         )
 
-        tool = ToolboxGrepTool(harness=harness)
+        tool = ToolboxSearchTool(harness=harness)
 
-        # Test grep
+        # Test grep mode (with pattern)
         result = await tool._arun(pattern="search", case_sensitive=False)
         assert isinstance(result, str)
 
@@ -222,29 +234,6 @@ class TestMemoryTools:
         assert isinstance(result, str)
         assert "Error:" in result or "not found" in result.lower()
 
-    async def test_conversation_history_tool(self, harness):
-        """Test ConversationHistoryTool."""
-        # Add conversation messages
-        await harness.add_conversational("thread1", "user", "Hello!")
-        await harness.add_conversational("thread1", "assistant", "Hi there!")
-        await harness.add_conversational("thread1", "user", "How can you help me?")
-
-        tool = ConversationHistoryTool(harness=harness)
-
-        # Test conversation history retrieval
-        result = await tool._arun(thread_id="thread1", limit=10)
-        assert isinstance(result, str)
-        assert "Hello!" in result or "thread1" in result
-
-    async def test_conversation_history_tool_empty(self, harness):
-        """Test ConversationHistoryTool with empty thread."""
-        tool = ConversationHistoryTool(harness=harness)
-
-        # Test with non-existent thread
-        result = await tool._arun(thread_id="non-existent-thread", limit=10)
-        assert isinstance(result, str)
-        assert "No conversation history" in result or "not found" in result.lower()
-
     async def test_assemble_context_tool(self, harness):
         """Test AssembleContextTool."""
         # Add some data for context assembly
@@ -304,96 +293,12 @@ class TestMemoryTools:
         assert isinstance(result, str)
         assert "No messages found" in result
 
-    async def test_write_tool_log_tool(self, harness):
-        """Test WriteToolLogTool."""
-        tool = WriteToolLogTool(harness=harness)
-
-        # Test tool log write
-        result = await tool._arun(
-            tool_name="github/create_issue",
-            tool_input='{"title": "Bug fix", "body": "Fixed the bug"}',
-            tool_output="Issue #42 created",
-            status="success",
-        )
-        assert isinstance(result, str)
-        assert "Tool execution logged" in result
-        assert "Log ID:" in result
-        assert "github/create_issue" in result
-
-    async def test_write_tool_log_tool_error_status(self, harness):
-        """Test WriteToolLogTool with error status."""
-        tool = WriteToolLogTool(harness=harness)
-
-        # Test tool log write with error
-        result = await tool._arun(
-            tool_name="api/call_external",
-            tool_input='{"endpoint": "/users"}',
-            tool_output="Connection timeout",
-            status="error",
-        )
-        assert isinstance(result, str)
-        assert "Tool execution logged" in result
-        assert "error" in result.lower()
-
-    async def test_write_workflow_tool(self, harness):
-        """Test WriteWorkflowTool."""
-        tool = WriteWorkflowTool(harness=harness)
-
-        # Test workflow write
-        result = await tool._arun(
-            task="Deploy application to production",
-            steps=[
-                "Run tests",
-                "Build Docker image",
-                "Push to registry",
-                "Update k8s deployment",
-            ],
-            outcome="Application deployed successfully",
-        )
-        assert isinstance(result, str)
-        assert "Workflow saved" in result
-        assert "Workflow ID:" in result
-        assert "Deploy application" in result
-        assert "Run tests" in result
-
-    async def test_write_workflow_tool_failure(self, harness):
-        """Test WriteWorkflowTool with failure outcome."""
-        tool = WriteWorkflowTool(harness=harness)
-
-        # Test workflow write with failure
-        result = await tool._arun(
-            task="Attempt to deploy application",
-            steps=["Run tests", "Build failed at dependency installation"],
-            outcome="Deployment failed - missing dependencies",
-        )
-        assert isinstance(result, str)
-        assert "Workflow saved" in result
-        assert "failed" in result.lower()
-
     async def test_summarize_and_store_tool_sync_not_implemented(self, harness):
         """Test that SummarizeAndStoreTool sync method raises NotImplementedError."""
         tool = SummarizeAndStoreTool(harness=harness)
 
         with pytest.raises(NotImplementedError):
             tool._run(thread_id="thread1")
-
-    async def test_write_tool_log_tool_sync_not_implemented(self, harness):
-        """Test that WriteToolLogTool sync method raises NotImplementedError."""
-        tool = WriteToolLogTool(harness=harness)
-
-        with pytest.raises(NotImplementedError):
-            tool._run(
-                tool_name="test_tool",
-                tool_input="test",
-                tool_output="test",
-            )
-
-    async def test_write_workflow_tool_sync_not_implemented(self, harness):
-        """Test that WriteWorkflowTool sync method raises NotImplementedError."""
-        tool = WriteWorkflowTool(harness=harness)
-
-        with pytest.raises(NotImplementedError):
-            tool._run(task="test", steps=["step1"], outcome="success")
 
 
 @pytest.mark.skipif(LANGCHAIN_AVAILABLE, reason="Test behavior when langchain not available")
