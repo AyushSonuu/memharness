@@ -429,7 +429,7 @@ async def consolidate_with_logging():
     print(f"  Reduction: {before_count - after_count} memories ({(before_count - after_count) / before_count * 100:.1f}%)")
 ```
 
-### 5. Combine with Garbage Collection
+### 5. Combine with Summarization
 
 ```python
 async def cleanup_pipeline():
@@ -442,14 +442,8 @@ async def cleanup_pipeline():
     summarizer = SummarizerAgent(harness, llm=llm)
     # (summarization logic)
 
-    # Step 3: Archive old memories
-    gc = GCAgent(harness, archive_after_days=90, delete_after_days=365)
-    gc_result = await gc.run()
-
     print(f"Cleanup complete:")
     print(f"  Consolidated: {consolidate_result['merged']}")
-    print(f"  Archived: {gc_result['archived']}")
-    print(f"  Deleted: {gc_result['deleted']}")
 ```
 
 ## Entity Consolidation Example

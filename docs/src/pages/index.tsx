@@ -74,12 +74,12 @@ const FeatureList: FeatureItem[] = [
     ),
   },
   {
-    title: '12 Agent Tools',
+    title: '3 Read-Only Tools',
     emoji: '🔍',
     description: (
       <>
-        Complete self-awareness toolkit: search, read, write, expand summaries,
-        log tool calls, save workflows, assemble context, explore toolbox VFS.
+        Read-only toolkit: search across all memory types, read specific memories,
+        and assemble optimal context for LLM calls.
       </>
     ),
   },
@@ -120,26 +120,26 @@ function Feature({title, emoji, description}: FeatureItem) {
 }
 
 const agentExample = `from memharness import MemoryHarness
-from memharness.tools import get_memory_tools
+from memharness.tools import get_read_tools
 from langchain.agents import create_agent
 
 # 1. Create memory harness (SQLite for dev, PostgreSQL for prod)
 harness = MemoryHarness("sqlite:///agent_memory.db")
 await harness.connect()
 
-# 2. Get all 12 memory tools for agent self-awareness
-memory_tools = get_memory_tools(harness)
+# 2. Get read-only memory tools for agent self-awareness
+memory_tools = get_read_tools(harness)
 
 # 3. Create a memory-aware agent
 agent = create_agent(
     model="anthropic:claude-sonnet-4-6",  # any LLM via init_chat_model
     tools=memory_tools + your_other_tools,
     system_prompt="""You are a helpful assistant with persistent memory.
-Use your memory tools to remember important information.
+Use your memory tools to search and read important information.
 Before answering, search your memory for relevant context.""",
 )
 
-# 4. Agent can now search, read, write, expand, summarize, log...
+# 4. Agent can now search, read, and assemble context...
 result = await agent.ainvoke({
     "messages": [{"role": "user", "content": "What did we discuss yesterday?"}]
 })`;
@@ -178,7 +178,7 @@ function QuickStart() {
               🤖 Use with LangChain Agent
             </Heading>
             <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1rem'}}>
-              Give any agent persistent, searchable memory with 12 self-awareness tools
+              Give any agent persistent, searchable memory with 3 read-only tools
             </p>
             <CodeBlock language="python" title="langchain_agent.py" showLineNumbers>
               {agentExample}
@@ -207,7 +207,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="Memory Infrastructure for AI Agents"
-      description="Framework-agnostic memory infrastructure for AI agents. 8 memory types, pluggable backends, 12 self-awareness tools.">
+      description="Framework-agnostic memory infrastructure for AI agents. 8 memory types, pluggable backends, 3 read-only tools.">
       <HomepageHeader />
       <main>
         <section className={styles.features}>

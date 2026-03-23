@@ -59,25 +59,21 @@ async with MemoryHarness("sqlite:///memory.db") as harness:
 | **Tool Log** | SQL | Tool execution audit trail |
 | **Persona** | Vector | Agent identity and style |
 
-## 7 Self-Awareness Tools
+## Read-Only Memory Tools
 
-Give any agent the ability to manage its own memory:
+Give any agent read-only access to its memory:
 
 ```python
-from memharness.tools import get_memory_tools
+from memharness.tools import get_read_tools
 
-tools = get_memory_tools(harness)  # Returns 7 LangChain BaseTool instances
+tools = get_read_tools(harness)  # Returns 3 LangChain BaseTool instances
 ```
 
 | Tool | What the agent can do |
 |------|-----------------------|
 | `memory_search` | Search across all memory types |
 | `memory_read` | Read a specific memory by ID |
-| `memory_write` | Write to any memory type |
-| `expand_summary` | Expand compacted summary to full content |
-| `summarize_conversation` | Compress a long conversation thread |
 | `assemble_context` | Full context assembly (BEFORE-loop) |
-| `toolbox_search` | Discover available tools |
 
 ## Embedded Agents
 
@@ -90,25 +86,7 @@ tools = get_memory_tools(harness)  # Returns 7 LangChain BaseTool instances
 | **EntityExtractorAgent** | Extracts entities from conversations (regex or LLM) |
 | **ConsolidatorAgent** | Merges duplicate entities |
 
-## Fast Path / Slow Path
-
-```python
-from memharness.core.fast_path import FastPath
-from memharness.core.slow_path import SlowPath
-
-# Fast path: user-facing (low latency)
-fast = FastPath(harness)
-ctx = await fast.process_user_message("thread-1", "How do I deploy?")
-# → saves message + assembles context (no extraction, no summarization)
-
-await fast.process_assistant_response("thread-1", response)
-
-# Slow path: background workers (entity extraction, summarization, consolidation)
-slow = SlowPath(harness)
-results = await slow.run_all()
-```
-
-## Summarization (Course-Aligned)
+## Summarization
 
 After summarization, context loads **summary + recent messages only** — not all messages:
 
@@ -132,22 +110,17 @@ Configurable via `max_tokens` (default 4000) and `summarize_threshold` (default 
 ```bash
 # PostgreSQL + pgvector
 docker compose up -d
-
-# With background workers (entity extraction, summarization, consolidation)
-docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
 ```
-
-Workers run `SlowPath.run_all()` every 5 minutes (configurable via `WORKER_INTERVAL`).
 
 ## Use with LangChain
 
 ```python
 from langchain.agents import create_agent
-from memharness.tools import get_memory_tools
+from memharness.tools import get_read_tools
 
 agent = create_agent(
     model="anthropic:claude-sonnet-4-6",
-    tools=get_memory_tools(harness),
+    tools=get_read_tools(harness),
 )
 ```
 

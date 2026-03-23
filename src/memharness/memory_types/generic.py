@@ -254,7 +254,6 @@ class GenericMixin(BaseMixin):
                 MemoryType.ENTITY,
                 MemoryType.WORKFLOW,
                 MemoryType.TOOLBOX,
-                MemoryType.SKILLS,
                 MemoryType.FILE,
             ]
 
