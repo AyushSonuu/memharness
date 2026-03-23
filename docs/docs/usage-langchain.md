@@ -12,136 +12,120 @@ memharness wraps your LangChain agent with a single middleware that handles all 
 pip install memharness langchain langchain-anthropic
 ```
 
-## Quick Start — One Middleware Does Everything
+## Quick Start — Three Middleware
 
 ```python
 import asyncio
 from memharness import MemoryHarness
 from memharness.tools import get_read_tools
-from memharness.agents import ContextAssemblyAgent, SummarizerAgent, EntityExtractorAgent
+from memharness.agents import ContextAssemblyAgent
+from memharness.agents.agent_workflow import MemoryWorkflowMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
-class MemharnessMiddleware(AgentMiddleware):
-    """Single middleware that handles all memory operations.
+# ── BEFORE middleware: load context ──────────────────────────────────
 
-    BEFORE model call:
-    1. Save user message to conversation table
-    2. Assemble context (KB, entities, workflows, persona, summaries)
-    3. Auto-summarize if context > 80% full
-    4. Inject context as SystemMessage + conversation history
+class ContextMiddleware(AgentMiddleware):
+    """BEFORE: inject KB, entities, workflows, persona as SystemMessage."""
 
-    AFTER model call:
-    5. Save assistant response to conversation table
-    6. Extract entities from response (regex, no LLM needed)
-    """
-
-    def __init__(
-        self,
-        harness: MemoryHarness,
-        thread_id: str,
-        max_tokens: int = 4000,
-        summarize_threshold: float = 0.8,
-    ):
+    def __init__(self, harness: MemoryHarness, thread_id: str, max_tokens: int = 4000):
         super().__init__()
-        self.harness = harness
+        self._ctx = ContextAssemblyAgent(harness, max_tokens=max_tokens)
         self.thread_id = thread_id
-        self._ctx_agent = ContextAssemblyAgent(harness, max_tokens=max_tokens)
-        self._summarizer = SummarizerAgent(harness)
-        self._entity_extractor = EntityExtractorAgent(harness)
-        self._summarize_threshold = summarize_threshold
 
     async def abefore_model(self, state, runtime):
-        """BEFORE: save msg → assemble context → summarize if needed."""
         messages = state.get("messages", [])
-        if not messages:
-            return None
-
-        # Find latest user query
-        query = ""
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                query = msg.content
-                break
+        query = next((m.content for m in reversed(messages) if isinstance(m, HumanMessage)), "")
         if not query:
             return None
-
-        # 1. Save user message
-        await self.harness.add_conversational(self.thread_id, "user", query)
-
-        # 2. Assemble context from all memory types
-        ctx = await self._ctx_agent.assemble(query=query, thread_id=self.thread_id)
-
-        # 3. Auto-summarize if context too large
-        if ctx.context_usage_percent >= self._summarize_threshold:
-            await self._summarizer.summarize_thread(self.thread_id)
-            ctx = await self._ctx_agent.assemble(query=query, thread_id=self.thread_id)
-
-        # 4. Inject as messages (SystemMessage + conversation history)
-        context_messages = ctx.to_messages()
-        return {"messages": context_messages}
+        ctx = await self._ctx.assemble(query=query, thread_id=self.thread_id, include_tools=False)
+        sections = []
+        if ctx.persona: sections.append(f"## Agent Persona\n{ctx.persona}")
+        if ctx.knowledge: sections.append(f"## Relevant Knowledge\n{ctx.knowledge}")
+        if ctx.entities: sections.append(f"## Known Entities\n{ctx.entities}")
+        if ctx.workflows: sections.append(f"## Relevant Workflows\n{ctx.workflows}")
+        if not sections:
+            return None
+        return {"messages": [SystemMessage(content="\n\n".join(sections))] + list(messages)}
 
     async def aafter_model(self, state, runtime):
-        """AFTER: save response → extract entities."""
-        messages = state.get("messages", [])
-        if not messages:
-            return None
-
-        last_msg = messages[-1]
-        if not isinstance(last_msg, AIMessage) or not last_msg.content:
-            return None
-
-        # 5. Save assistant response
-        await self.harness.add_conversational(
-            self.thread_id, "assistant", last_msg.content
-        )
-
-        # 6. Extract entities from response
-        try:
-            entities = await self._entity_extractor.extract_entities(last_msg.content)
-            for category, names in entities.items():
-                for name in names:
-                    await self.harness.add_entity(
-                        name=name,
-                        entity_type=category,
-                        description=f"{category}: {name}",
-                    )
-        except Exception:
-            pass  # Entity extraction is best-effort
-
         return None
 
 
+# ── BEFORE+AFTER middleware: conversation persistence ────────────────
+
+class ConversationMiddleware(AgentMiddleware):
+    """BEFORE: load past messages. AFTER: save new messages."""
+
+    def __init__(self, harness: MemoryHarness, thread_id: str):
+        super().__init__()
+        self.harness = harness
+        self.thread_id = thread_id
+        self._loaded = 0
+
+    async def abefore_model(self, state, runtime):
+        memories = await self.harness.get_conversational(self.thread_id, limit=50)
+        if not memories:
+            return None
+        past = []
+        for m in memories:
+            role = m.metadata.get("role", "user")
+            if role in ("user", "human"):
+                past.append(HumanMessage(content=m.content))
+            elif role in ("assistant", "ai"):
+                past.append(AIMessage(content=m.content))
+        current = list(state.get("messages", []))
+        self._loaded = len(current)
+        return {"messages": past + current}
+
+    async def aafter_model(self, state, runtime):
+        messages = state.get("messages", [])
+        for msg in messages[self._loaded:]:
+            if isinstance(msg, HumanMessage):
+                await self.harness.add_conversational(self.thread_id, "user", msg.content)
+            elif isinstance(msg, AIMessage) and msg.content:
+                await self.harness.add_conversational(self.thread_id, "assistant", msg.content)
+        self._loaded = len(messages)
+        return None
+
+
+# ── AFTER middleware: MemoryWorkflowMiddleware (from package) ────────
+# Handles: save_response → extract_entities → save_workflow → check_summarization
+# This is a LangGraph workflow wrapped as middleware — already in the package!
+
+
 async def main():
-    # 1. Initialize memory
     harness = MemoryHarness("sqlite:///agent_memory.db")
     await harness.connect()
 
-    # 2. Pre-load some knowledge (one-time setup)
-    await harness.add_knowledge(
-        "Deployments require approval from the platform team", source="runbook"
-    )
+    # Pre-load knowledge (one-time)
+    await harness.add_knowledge("Deployments require platform team approval", source="runbook")
 
-    # 3. Create YOUR agent with read-only memory tools + single middleware
+    thread_id = "user-alice"
+
     agent = create_agent(
         model="anthropic:claude-sonnet-4-6",
         tools=get_read_tools(harness),  # 5 read-only tools
-        middleware=[MemharnessMiddleware(harness, thread_id="user-alice")],
+        middleware=[
+            ContextMiddleware(harness, thread_id),             # BEFORE: inject context
+            ConversationMiddleware(harness, thread_id),         # BEFORE+AFTER: messages
+            MemoryWorkflowMiddleware(harness, thread_id),       # AFTER: entities + workflow + summarize
+        ],
     )
 
-    # 4. Just call it — middleware handles everything
-    result = await agent.ainvoke({
+    # Turn 1
+    r1 = await agent.ainvoke({
         "messages": [{"role": "user", "content": "How do I deploy to production?"}]
     })
-    print(result["messages"][-1].content)
+    print("Turn 1:", r1["messages"][-1].content)
 
-    # Next turn — memory persists!
-    result = await agent.ainvoke({
+    # Turn 2 — memory persists!
+    r2 = await agent.ainvoke({
         "messages": [{"role": "user", "content": "What did I just ask about?"}]
     })
-    print(result["messages"][-1].content)
+    print("Turn 2:", r2["messages"][-1].content)
 
     await harness.disconnect()
 
