@@ -210,6 +210,111 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+## Context Assembly Middleware
+
+The conversation middleware only handles chat messages. For **full memory context** (knowledge base, entities, workflows, persona) injected before every model call, use this middleware:
+
+```python
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import SystemMessage
+from memharness import MemoryHarness
+from memharness.agents import ContextAssemblyAgent
+
+
+class MemharnessContextMiddleware(AgentMiddleware):
+    """Injects full memory context (KB, entities, workflows, persona) before each model call.
+
+    Uses ContextAssemblyAgent to assemble relevant memories and injects them
+    as a SystemMessage at the start of the message list.
+    """
+
+    def __init__(self, harness: MemoryHarness, thread_id: str, max_tokens: int = 4000):
+        super().__init__()
+        self.harness = harness
+        self.thread_id = thread_id
+        self._ctx_agent = ContextAssemblyAgent(harness, max_tokens=max_tokens)
+
+    async def abefore_model(self, state, runtime):
+        """Assemble memory context and inject as SystemMessage."""
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        # Get the latest user query
+        query = ""
+        for msg in reversed(messages):
+            if hasattr(msg, "type") and msg.type == "human":
+                query = msg.content
+                break
+            elif hasattr(msg, "content"):
+                query = msg.content
+                break
+
+        if not query:
+            return None
+
+        # Assemble context from all memory types
+        ctx = await self._ctx_agent.assemble(
+            query=query,
+            thread_id=self.thread_id,
+            include_tools=False,  # tools are already provided via tools=[]
+        )
+
+        # Build context sections
+        sections = []
+        if ctx.persona:
+            sections.append(f"## Agent Persona\n{ctx.persona}")
+        if ctx.knowledge:
+            sections.append(f"## Relevant Knowledge\n{ctx.knowledge}")
+        if ctx.entities:
+            sections.append(f"## Known Entities\n{ctx.entities}")
+        if ctx.workflows:
+            sections.append(f"## Relevant Workflows\n{ctx.workflows}")
+
+        if not sections:
+            return None
+
+        # Inject as SystemMessage at the start
+        context_msg = SystemMessage(content="\n\n".join(sections))
+        return {"messages": [context_msg] + list(messages)}
+```
+
+### Using Both Middlewares Together
+
+```python
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",
+    tools=get_memory_tools(harness),
+    middleware=[
+        # 1. Inject full memory context (KB, entities, workflows, persona)
+        MemharnessContextMiddleware(harness, thread_id="user-123", max_tokens=3000),
+        # 2. Persist conversation messages across sessions
+        MemharnessConversationMiddleware(harness, thread_id="user-123"),
+    ],
+)
+
+# Agent now has:
+# - Full memory context injected before every LLM call (middleware 1)
+# - Conversation history persisted across sessions (middleware 2)
+# - 7 self-awareness tools for searching/writing memory (tools)
+```
+
+### What Gets Injected
+
+```mermaid
+graph TD
+    U["👤 User message"] --> CM["MemharnessContextMiddleware"]
+    CM --> |"Reads from memory"| KB["📚 Knowledge Base"]
+    CM --> |"Reads from memory"| EN["👤 Entities"]
+    CM --> |"Reads from memory"| WF["⚙️ Workflows"]
+    CM --> |"Reads from memory"| PE["🎭 Persona"]
+    CM --> SM["SystemMessage with context sections"]
+    SM --> CV["MemharnessConversationMiddleware"]
+    CV --> |"Loads past messages"| CONV["💬 Conversation History"]
+    CV --> LLM["🤖 LLM sees: SystemMessage + past messages + current message"]
+    LLM --> |"Response"| CV2["Save assistant response"]
+```
+
 ## Complete Working Example
 
 Here's a full end-to-end script you can save as `example.py` and run:
