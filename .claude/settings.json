@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/I772464/Library/CloudStorage/OneDrive-SAPSE/Desktop/my-memory/**)"
+      "Read(//Users/I772464/Library/CloudStorage/OneDrive-SAPSE/Desktop/my-memory/**)",
+      "Read(//Users/I772464/Desktop/my-memory/tech/agent-memory/code/L5/**)",
+      "Read(//Users/I772464/Library/CloudStorage/OneDrive-SAPSE/Desktop/my-memory/tech/agent-memory/code/L5/**)",
+      "Read(//Users/I772464/Desktop/my-memory/tech/agent-memory/code/L6/**)",
+      "Read(//Users/I772464/Library/CloudStorage/OneDrive-SAPSE/Desktop/my-memory/tech/agent-memory/code/L6/**)"
     ]
   }
 }
