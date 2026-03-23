@@ -11,6 +11,9 @@ import pytest
 from memharness import MemoryHarness
 from memharness.tools import (
     LANGCHAIN_AVAILABLE,
+    AssembleContextTool,
+    ConversationHistoryTool,
+    ExpandSummaryTool,
     MemoryReadTool,
     MemorySearchTool,
     MemoryStatsTool,
@@ -37,7 +40,7 @@ class TestMemoryTools:
         """Test get_memory_tools returns all tools."""
         tools = get_memory_tools(harness)
 
-        assert len(tools) == 6
+        assert len(tools) == 9
         assert all(hasattr(tool, "name") for tool in tools)
         assert all(hasattr(tool, "description") for tool in tools)
         assert all(hasattr(tool, "_arun") for tool in tools)
@@ -50,6 +53,9 @@ class TestMemoryTools:
             "memory_stats",
             "toolbox_tree",
             "toolbox_grep",
+            "expand_summary",
+            "get_conversation_history",
+            "assemble_context",
         }
         assert tool_names == expected_names
 
@@ -179,6 +185,86 @@ class TestMemoryTools:
         schema = tool.args_schema.model_json_schema()
         assert "properties" in schema
         assert "query" in schema["properties"]
+
+    async def test_expand_summary_tool(self, harness):
+        """Test ExpandSummaryTool."""
+        # Create some messages
+        msg1 = await harness.add_conversational("thread1", "user", "Hello, how are you?")
+        msg2 = await harness.add_conversational("thread1", "assistant", "I'm doing well, thanks!")
+        msg3 = await harness.add_conversational("thread1", "user", "What's the weather like?")
+
+        # Create a summary
+        summary_id = await harness.add_summary(
+            summary="Conversation about greetings and weather query",
+            source_ids=[msg1, msg2, msg3],
+            thread_id="thread1",
+        )
+
+        tool = ExpandSummaryTool(harness=harness)
+
+        # Test expand
+        result = await tool._arun(summary_id=summary_id)
+        assert isinstance(result, str)
+        assert "Hello, how are you?" in result or "greetings" in result.lower()
+
+    async def test_expand_summary_tool_not_found(self, harness):
+        """Test ExpandSummaryTool with non-existent summary."""
+        tool = ExpandSummaryTool(harness=harness)
+
+        # Test with non-existent ID
+        result = await tool._arun(summary_id="non-existent-id")
+        assert isinstance(result, str)
+        assert "Error:" in result or "not found" in result.lower()
+
+    async def test_conversation_history_tool(self, harness):
+        """Test ConversationHistoryTool."""
+        # Add conversation messages
+        await harness.add_conversational("thread1", "user", "Hello!")
+        await harness.add_conversational("thread1", "assistant", "Hi there!")
+        await harness.add_conversational("thread1", "user", "How can you help me?")
+
+        tool = ConversationHistoryTool(harness=harness)
+
+        # Test conversation history retrieval
+        result = await tool._arun(thread_id="thread1", limit=10)
+        assert isinstance(result, str)
+        assert "Hello!" in result or "thread1" in result
+
+    async def test_conversation_history_tool_empty(self, harness):
+        """Test ConversationHistoryTool with empty thread."""
+        tool = ConversationHistoryTool(harness=harness)
+
+        # Test with non-existent thread
+        result = await tool._arun(thread_id="non-existent-thread", limit=10)
+        assert isinstance(result, str)
+        assert "No conversation history" in result or "not found" in result.lower()
+
+    async def test_assemble_context_tool(self, harness):
+        """Test AssembleContextTool."""
+        # Add some data for context assembly
+        await harness.add_conversational("thread1", "user", "Tell me about Python")
+        await harness.add_conversational("thread1", "assistant", "Python is a programming language")
+        await harness.add_knowledge(content="Python was created by Guido van Rossum")
+        await harness.add_entity(
+            name="Python", entity_type="programming_language", description="High-level language"
+        )
+
+        tool = AssembleContextTool(harness=harness)
+
+        # Test context assembly
+        result = await tool._arun(query="Python programming", thread_id="thread1", max_tokens=4000)
+        assert isinstance(result, str)
+        # Should contain some assembled context
+        assert len(result) > 0
+
+    async def test_assemble_context_tool_empty(self, harness):
+        """Test AssembleContextTool with no context."""
+        tool = AssembleContextTool(harness=harness)
+
+        # Test with empty memory
+        result = await tool._arun(query="something", thread_id="empty-thread", max_tokens=4000)
+        assert isinstance(result, str)
+        # Should still return something (even if minimal)
 
 
 @pytest.mark.skipif(LANGCHAIN_AVAILABLE, reason="Test behavior when langchain not available")

@@ -40,6 +40,9 @@ __all__ = [
     "MemoryStatsTool",
     "ToolboxTreeTool",
     "ToolboxGrepTool",
+    "ExpandSummaryTool",
+    "ConversationHistoryTool",
+    "AssembleContextTool",
     "get_memory_tools",
     "LANGCHAIN_AVAILABLE",
 ]
@@ -93,6 +96,27 @@ class ToolboxGrepInput(BaseModel):
 
     pattern: str = Field(description="Regex pattern to search for in tool names and descriptions")
     case_sensitive: bool = Field(default=False, description="Whether the search is case-sensitive")
+
+
+class ExpandSummaryInput(BaseModel):
+    """Input schema for expand summary."""
+
+    summary_id: str = Field(description="The ID of the summary to expand back to full content")
+
+
+class ConversationHistoryInput(BaseModel):
+    """Input schema for conversation history."""
+
+    thread_id: str = Field(description="Conversation thread ID")
+    limit: int = Field(default=20, description="Max messages to retrieve")
+
+
+class AssembleContextInput(BaseModel):
+    """Input schema for assemble context."""
+
+    query: str = Field(description="Query to assemble context for")
+    thread_id: str = Field(description="Conversation thread ID")
+    max_tokens: int = Field(default=4000, description="Maximum tokens in assembled context")
 
 
 # =============================================================================
@@ -398,6 +422,172 @@ class ToolboxGrepTool(BaseTool):
         )
 
 
+class ExpandSummaryTool(BaseTool):
+    """
+    Expand a compacted summary back to its full original content.
+
+    This tool allows agents to retrieve the full original content from a
+    summary that was previously compacted. Use this when you need details
+    from a conversation that was previously summarized.
+    """
+
+    name: str = "expand_summary"
+    description: str = (
+        "Expand a compacted summary back to its full original content. "
+        "Use when you need details from a conversation that was previously summarized. "
+        "The summary_id comes from the Context Summaries section."
+    )
+    args_schema: type[BaseModel] = ExpandSummaryInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, summary_id: str) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, summary_id: str) -> str:
+        """
+        Execute expand summary.
+
+        Args:
+            summary_id: The ID of the summary to expand.
+
+        Returns:
+            Formatted original content.
+        """
+        try:
+            originals = await self.harness.expand_summary(summary_id)
+            if not originals:
+                return f"No original content found for summary {summary_id}"
+
+            # Format as conversation messages
+            lines = []
+            for m in originals:
+                role = m.metadata.get("role", "user")
+                lines.append(f"{role}: {m.content}")
+
+            return "\n".join(lines)
+        except KeyError as e:
+            return f"Error: {e}"
+
+
+class ConversationHistoryTool(BaseTool):
+    """
+    Get conversation history for a thread.
+
+    This tool allows agents to retrieve messages from a specific conversation
+    thread. Useful for reviewing what was discussed in a thread.
+    """
+
+    name: str = "get_conversation_history"
+    description: str = (
+        "Get conversation history for a thread as a list of messages. "
+        "Returns recent messages from the specified conversation thread."
+    )
+    args_schema: type[BaseModel] = ConversationHistoryInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, thread_id: str, limit: int = 20) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, thread_id: str, limit: int = 20) -> str:
+        """
+        Execute conversation history retrieval.
+
+        Args:
+            thread_id: Conversation thread ID.
+            limit: Max messages to retrieve.
+
+        Returns:
+            Formatted conversation history.
+        """
+        messages = await self.harness.get_conversational(thread_id, limit=limit)
+        if not messages:
+            return f"No conversation history found for thread {thread_id}"
+
+        # Format as conversation messages
+        lines = [f"Conversation history for thread {thread_id} ({len(messages)} messages):\n"]
+        for m in messages:
+            role = m.metadata.get("role", "user")
+            timestamp = m.metadata.get("timestamp", "")
+            if timestamp:
+                lines.append(f"[{timestamp}] {role}: {m.content}")
+            else:
+                lines.append(f"{role}: {m.content}")
+
+        return "\n".join(lines)
+
+
+class AssembleContextTool(BaseTool):
+    """
+    Assemble all relevant memory context for a query.
+
+    This tool allows agents to explicitly request context assembly,
+    gathering persona, conversation history, knowledge, workflows,
+    entities, and tools relevant to their query.
+    """
+
+    name: str = "assemble_context"
+    description: str = (
+        "Assemble all relevant memory context for a query. "
+        "Returns persona, conversation history, knowledge, workflows, entities, and tools. "
+        "Use this when you need comprehensive context about a topic or task."
+    )
+    args_schema: type[BaseModel] = AssembleContextInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, query: str, thread_id: str, max_tokens: int = 4000) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, query: str, thread_id: str, max_tokens: int = 4000) -> str:
+        """
+        Execute context assembly.
+
+        Args:
+            query: Query to assemble context for.
+            thread_id: Conversation thread ID.
+            max_tokens: Maximum tokens in assembled context.
+
+        Returns:
+            Formatted context string.
+        """
+        context = await self.harness.assemble_context(
+            query=query, thread_id=thread_id, max_tokens=max_tokens
+        )
+        if not context:
+            return "No relevant context found."
+
+        return context
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -414,7 +604,16 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         harness: The MemoryHarness instance to create tools for.
 
     Returns:
-        List of BaseTool instances.
+        List of BaseTool instances (9 tools total):
+        1. MemorySearchTool - Search across memory types
+        2. MemoryReadTool - Read memory by ID
+        3. MemoryWriteTool - Write new memory
+        4. MemoryStatsTool - Get memory statistics
+        5. ToolboxTreeTool - Explore tools VFS
+        6. ToolboxGrepTool - Search tools by pattern
+        7. ExpandSummaryTool - Expand compacted summaries
+        8. ConversationHistoryTool - Get thread messages
+        9. AssembleContextTool - Full context assembly
 
     Raises:
         ImportError: If langchain-core is not installed.
@@ -442,4 +641,7 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         MemoryStatsTool(harness=harness),
         ToolboxTreeTool(harness=harness),
         ToolboxGrepTool(harness=harness),
+        ExpandSummaryTool(harness=harness),
+        ConversationHistoryTool(harness=harness),
+        AssembleContextTool(harness=harness),
     ]
