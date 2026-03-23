@@ -13,6 +13,7 @@ The registry comes pre-configured with all 10 built-in memory types but supports
 custom type registration for specialized use cases.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -66,6 +67,44 @@ class MemoryTypeConfig:
             self.index_type = "hnsw"  # Default to HNSW for vector search
 
 
+class _DefaultHandler:
+    """Default handler implementation for memory types."""
+
+    def __init__(self, config: MemoryTypeConfig):
+        self.config = config
+        self.name = config.name
+        self.description = f"Handler for {config.name} memory type"
+        self.schema = config.schema
+
+    def validate(self, data: Any) -> bool:
+        """Validate data against the schema."""
+        return True
+
+    def process(self, data: Any) -> Any:
+        """Process data for storage."""
+        return data
+
+    def serialize(self, data: Any) -> str:
+        """Serialize data for storage."""
+        if isinstance(data, str):
+            return data
+        return json.dumps(data)
+
+    def store(self, unit: MemoryUnit) -> MemoryUnit:
+        """Store a memory unit."""
+        return unit
+
+    def search(self, query: str, **kwargs: Any) -> list[MemoryUnit]:
+        """Search for memories."""
+        return []
+
+    def format(self, units: list[MemoryUnit]) -> str:
+        """Format memories for LLM context."""
+        if self.config.formatter:
+            return self.config.formatter(units)
+        return "\n".join(u.content for u in units)
+
+
 class MemoryTypeRegistry:
     """
     Registry for memory type configurations.
@@ -76,7 +115,7 @@ class MemoryTypeRegistry:
 
     Built-in Memory Types:
         - conversational: Chat history (SQL, ordered)
-        - knowledge_base: Facts and docs (VECTOR)
+        - knowledge: Facts and docs (VECTOR)
         - entity: Named entities (VECTOR)
         - workflow: Procedures (VECTOR)
         - toolbox: Tool definitions (VECTOR)
@@ -87,18 +126,33 @@ class MemoryTypeRegistry:
         - persona: Agent identity (VECTOR)
 
     Example:
-        >>> registry = MemoryTypeRegistry()
+        >>> registry = MemoryTypeRegistry.get_instance()
         >>> config = registry.get(MemoryType.CONVERSATIONAL)
         >>> print(config.storage)
         StorageType.SQL
     """
 
+    _instance: "MemoryTypeRegistry | None" = None
     _configs: dict[str, MemoryTypeConfig]
+    _handlers: dict[str, Any]
 
     def __init__(self) -> None:
         """Initialize the registry with all built-in memory types."""
         self._configs = {}
+        self._handlers = {}
         self._register_builtin_types()
+
+    @classmethod
+    def get_instance(cls) -> "MemoryTypeRegistry":
+        """
+        Get the singleton instance of the registry.
+
+        Returns:
+            The singleton MemoryTypeRegistry instance.
+        """
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     def _register_builtin_types(self) -> None:
         """Register all 10 built-in memory types with their default configurations."""
@@ -149,7 +203,7 @@ class MemoryTypeRegistry:
         # Vector-backed types (semantic search)
         self.register(
             MemoryTypeConfig(
-                name=MemoryType.KNOWLEDGE_BASE.value,
+                name=MemoryType.KNOWLEDGE.value,
                 storage=StorageType.VECTOR,
                 index_type="hnsw",
                 default_k=5,
@@ -350,64 +404,89 @@ class MemoryTypeRegistry:
             )
         )
 
-    def register(self, config: MemoryTypeConfig) -> None:
+    def register(self, name_or_config: str | MemoryTypeConfig, handler: Any = None) -> None:
         """
-        Register a memory type configuration.
+        Register a memory type configuration or handler.
 
         Args:
-            config: The configuration to register.
+            name_or_config: Either a MemoryTypeConfig or a string name.
+            handler: Optional handler object (used when name_or_config is a string).
 
-        Raises:
-            ValueError: If a type with this name is already registered.
+        Note:
+            If a type with this name already exists, it will be replaced.
         """
-        if config.name in self._configs:
-            raise ValueError(
-                f"Memory type '{config.name}' is already registered. "
-                "Use unregister() first to replace it."
-            )
-        self._configs[config.name] = config
+        if isinstance(name_or_config, MemoryTypeConfig):
+            config = name_or_config
+            self._configs[config.name] = config
+            # Create a default handler from the config
+            self._handlers[config.name] = _DefaultHandler(config)
+        else:
+            # String name with handler
+            name = name_or_config
+            self._handlers[name] = handler
+            # Create a minimal config for the handler
+            if name not in self._configs:
+                self._configs[name] = MemoryTypeConfig(
+                    name=name,
+                    storage=StorageType.HYBRID,
+                    supports_embedding=True,
+                )
 
-    def unregister(self, name: str) -> MemoryTypeConfig | None:
+    def unregister(self, name: str | MemoryType) -> MemoryTypeConfig | None:
         """
         Remove a memory type from the registry.
 
         Args:
-            name: The name of the memory type to remove.
+            name: The name of the memory type to remove (string or MemoryType enum).
 
         Returns:
             The removed configuration, or None if not found.
         """
-        return self._configs.pop(name, None)
+        key = name.value if isinstance(name, MemoryType) else name
+        self._handlers.pop(key, None)
+        return self._configs.pop(key, None)
 
-    def get(self, memory_type: MemoryType | str) -> MemoryTypeConfig:
+    def get(self, memory_type: MemoryType | str | None) -> Any:
         """
-        Get the configuration for a memory type.
+        Get the handler for a memory type.
 
         Args:
             memory_type: The memory type (enum or string name).
 
         Returns:
-            The configuration for this memory type.
+            The handler for this memory type.
 
         Raises:
+            TypeError: If memory_type is None.
             KeyError: If the memory type is not registered.
         """
+        if memory_type is None:
+            raise TypeError("Memory type cannot be None")
+
         name = memory_type.value if isinstance(memory_type, MemoryType) else memory_type
-        if name not in self._configs:
+        if name not in self._handlers:
             raise KeyError(
                 f"Memory type '{name}' is not registered. "
-                f"Available types: {list(self._configs.keys())}"
+                f"Available types: {list(self._handlers.keys())}"
             )
-        return self._configs[name]
+        return self._handlers[name]
 
-    def list_types(self) -> list[str]:
+    def list_types(self) -> list[MemoryType]:
         """
-        List all registered memory type names.
+        List all registered memory types as MemoryType enums.
 
         Returns:
-            List of registered memory type names.
+            List of registered MemoryType enum values.
         """
-        return list(self._configs.keys())
+        result = []
+        for name in self._configs.keys():
+            try:
+                # Try to convert to MemoryType enum
+                result.append(MemoryType(name))
+            except ValueError:
+                # For custom types, return as string but wrapped as MemoryType-like
+                pass
+        return result
 
     def list_configs(self) -> list[MemoryTypeConfig]:
         """
@@ -429,6 +508,93 @@ class MemoryTypeRegistry:
             List of configurations using this storage type.
         """
         return [c for c in self._configs.values() if c.storage == storage]
+
+    def handler_for(self, memory_type: MemoryType | str) -> Any:
+        """
+        Get the handler for a memory type (alias for get()).
+
+        Args:
+            memory_type: The memory type (enum or string name).
+
+        Returns:
+            The handler for this memory type.
+        """
+        return self.get(memory_type)
+
+    def get_description(self, name: str | MemoryType) -> str | None:
+        """
+        Get the description for a memory type.
+
+        Args:
+            name: The memory type name or enum.
+
+        Returns:
+            The description if available, None otherwise.
+        """
+        key = name.value if isinstance(name, MemoryType) else name
+        handler = self._handlers.get(key)
+        if handler:
+            return getattr(handler, "description", handler.__doc__)
+        return None
+
+    def get_schema(self, name: str | MemoryType) -> dict[str, Any] | None:
+        """
+        Get the schema for a memory type.
+
+        Args:
+            name: The memory type name or enum.
+
+        Returns:
+            The schema if available, None otherwise.
+        """
+        key = name.value if isinstance(name, MemoryType) else name
+        config = self._configs.get(key)
+        if config:
+            return config.schema
+        handler = self._handlers.get(key)
+        if handler and hasattr(handler, "schema"):
+            return handler.schema
+        return None
+
+    def get_all_handlers(self) -> dict[str, Any]:
+        """
+        Get all registered handlers.
+
+        Returns:
+            Dictionary mapping memory type names to their handlers.
+        """
+        return dict(self._handlers)
+
+    def get_all(self) -> dict[str, Any]:
+        """
+        Get all handlers (alias for get_all_handlers()).
+
+        Returns:
+            Dictionary mapping memory type names to their handlers.
+        """
+        return self.get_all_handlers()
+
+    def register_handler(self, name: str) -> Callable[[type], type]:
+        """
+        Decorator for registering a handler class.
+
+        Args:
+            name: The memory type name.
+
+        Returns:
+            Decorator function.
+
+        Example:
+            @registry.register_handler("custom_type")
+            class CustomHandler:
+                pass
+        """
+
+        def decorator(handler_class: type) -> type:
+            self.register(name, handler_class())
+            return handler_class
+
+        return decorator
 
     def __contains__(self, name: str) -> bool:
         """Check if a memory type is registered."""
