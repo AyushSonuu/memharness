@@ -122,19 +122,22 @@ async def save_workflow(state: AfterState, harness: MemoryHarness) -> dict[str, 
 
 
 async def check_summarization(
-    state: AfterState, harness: MemoryHarness, threshold: int = 50
+    state: AfterState, harness: MemoryHarness, max_tokens: int = 4000, threshold: float = 0.8
 ) -> dict[str, Any]:
-    """Summarize conversation if thread exceeds threshold."""
+    """Summarize conversation if token usage exceeds threshold."""
     thread_id = state["thread_id"]
 
     try:
-        messages = await harness.get_conversational(thread_id, limit=threshold + 1)
-        if len(messages) >= threshold:
+        messages = await harness.get_conversational(thread_id, limit=200)
+        total_chars = sum(len(m.content) for m in messages)
+        token_estimate = total_chars // 4  # standard approximation
+        usage = token_estimate / max_tokens
+        if usage >= threshold:
             from memharness.agents.summarizer import SummarizerAgent
 
             summarizer = SummarizerAgent(harness)
             await summarizer.summarize_thread(thread_id)
-            logger.info("Summarized thread %s (%d messages)", thread_id, len(messages))
+            logger.info("Summarized thread %s (%.0f%% token usage)", thread_id, usage * 100)
             return {"summarized": True}
     except Exception as e:
         logger.debug("Summarization check failed: %s", e)
@@ -149,7 +152,8 @@ async def check_summarization(
 
 def create_after_workflow(
     harness: MemoryHarness,
-    summarize_threshold: int = 50,
+    max_tokens: int = 4000,
+    summarize_threshold: float = 0.8,
 ) -> StateGraph:
     """Create the AFTER-agent LangGraph workflow.
 
@@ -158,7 +162,8 @@ def create_after_workflow(
 
     Args:
         harness: The MemoryHarness instance.
-        summarize_threshold: Summarize when thread exceeds this message count.
+        max_tokens: Maximum context token budget (default 4000).
+        summarize_threshold: Trigger summarization at this usage percentage (default 0.8 = 80%).
 
     Returns:
         Compiled LangGraph StateGraph.
@@ -176,7 +181,7 @@ def create_after_workflow(
         return await save_workflow(state, harness)
 
     async def _check_summarization(state):
-        return await check_summarization(state, harness, summarize_threshold)
+        return await check_summarization(state, harness, max_tokens, summarize_threshold)
 
     # Add nodes
     builder.add_node("save_response", _save_response)
