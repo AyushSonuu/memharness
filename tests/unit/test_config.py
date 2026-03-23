@@ -4,10 +4,8 @@ Unit tests for memharness configuration.
 Tests Config class, YAML loading, and duration parsing.
 """
 
+
 import pytest
-from pathlib import Path
-import tempfile
-import os
 
 from memharness import Config, MemharnessConfig
 

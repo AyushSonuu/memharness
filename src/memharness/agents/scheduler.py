@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from memharness.agents.base import AgentConfig, AgentResult, EmbeddedAgent, TriggerType
 from memharness.agents.consolidator import ConsolidatorAgent
@@ -52,9 +52,9 @@ class AgentScheduler:
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         """
         Initialize the agent scheduler.
@@ -85,7 +85,7 @@ class AgentScheduler:
         self._max_history = 100
 
         # Background task for scheduled runs
-        self._scheduler_task: Optional[asyncio.Task] = None
+        self._scheduler_task: asyncio.Task | None = None
         self._scheduler_running = False
 
     @property
@@ -98,7 +98,7 @@ class AgentScheduler:
         """Get list of enabled agent names."""
         return [name for name, agent in self.agents.items() if agent.enabled]
 
-    def get_agent(self, name: str) -> Optional[EmbeddedAgent]:
+    def get_agent(self, name: str) -> EmbeddedAgent | None:
         """Get an agent by name."""
         return self.agents.get(name)
 
@@ -130,8 +130,8 @@ class AgentScheduler:
         self,
         content: str,
         memory_type: str,
-        namespace: Optional[tuple[str, ...]] = None,
-        memory_id: Optional[str] = None,
+        namespace: tuple[str, ...] | None = None,
+        memory_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Handle a memory write event.
@@ -295,7 +295,7 @@ class AgentScheduler:
 
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return {
                 "error": f"Agent {name} timed out after {self.config.agent_timeout_seconds}s",
                 "success": False,
@@ -381,7 +381,7 @@ class AgentScheduler:
 
     def get_history(
         self,
-        agent_name: Optional[str] = None,
+        agent_name: str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """

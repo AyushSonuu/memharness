@@ -29,7 +29,7 @@ class MemoryType(str, Enum):
     Each memory type serves a distinct purpose in the agent's memory architecture:
 
     - CONVERSATIONAL: Chat history and dialogue context (ordered by time)
-    - KNOWLEDGE_BASE: Factual information and documentation (semantic search)
+    - KNOWLEDGE: Factual information and documentation (semantic search)
     - ENTITY: Named entities with attributes and relationships
     - WORKFLOW: Procedural knowledge and multi-step processes
     - TOOLBOX: Tool definitions, schemas, and usage examples
@@ -41,7 +41,7 @@ class MemoryType(str, Enum):
     """
 
     CONVERSATIONAL = "conversational"
-    KNOWLEDGE_BASE = "knowledge_base"
+    KNOWLEDGE = "knowledge"
     ENTITY = "entity"
     WORKFLOW = "workflow"
     TOOLBOX = "toolbox"
@@ -55,7 +55,7 @@ class MemoryType(str, Enum):
     def uses_vector(self) -> bool:
         """Check if this memory type uses vector similarity search."""
         return self in {
-            MemoryType.KNOWLEDGE_BASE,
+            MemoryType.KNOWLEDGE,
             MemoryType.ENTITY,
             MemoryType.WORKFLOW,
             MemoryType.TOOLBOX,

@@ -12,12 +12,12 @@ All agents work WITHOUT an LLM (using deterministic fallbacks) but can
 leverage LLMs when provided for more intelligent operations.
 """
 
-from memharness.agents.base import EmbeddedAgent, TriggerType, AgentConfig
-from memharness.agents.summarizer import SummarizerAgent
-from memharness.agents.entity_extractor import EntityExtractorAgent
+from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
 from memharness.agents.consolidator import ConsolidatorAgent
+from memharness.agents.entity_extractor import EntityExtractorAgent
 from memharness.agents.gc import GCAgent
 from memharness.agents.scheduler import AgentScheduler
+from memharness.agents.summarizer import SummarizerAgent
 
 __all__ = [
     # Base classes

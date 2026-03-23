@@ -11,15 +11,14 @@ to reduce redundancy and improve retrieval quality.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from memharness.agents.base import AgentConfig, AgentResult, EmbeddedAgent, TriggerType
+from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -62,9 +61,9 @@ class ConsolidatorAgent(EmbeddedAgent):
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         super().__init__(memory, llm, config)
 
@@ -74,8 +73,8 @@ class ConsolidatorAgent(EmbeddedAgent):
 
     async def run(
         self,
-        memory_type: Optional[str] = None,
-        namespace: Optional[tuple[str, ...]] = None,
+        memory_type: str | None = None,
+        namespace: tuple[str, ...] | None = None,
         dry_run: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
@@ -170,9 +169,9 @@ class ConsolidatorAgent(EmbeddedAgent):
 
     async def find_duplicates(
         self,
-        memory_type: Optional[str] = None,
-        namespace: Optional[tuple[str, ...]] = None,
-        threshold: Optional[float] = None,
+        memory_type: str | None = None,
+        namespace: tuple[str, ...] | None = None,
+        threshold: float | None = None,
     ) -> list[SimilarityMatch]:
         """
         Find duplicate memories without merging.
@@ -193,8 +192,8 @@ class ConsolidatorAgent(EmbeddedAgent):
 
     async def _get_memories_to_consolidate(
         self,
-        memory_type: Optional[str],
-        namespace: Optional[tuple[str, ...]],
+        memory_type: str | None,
+        namespace: tuple[str, ...] | None,
     ) -> list[dict[str, Any]]:
         """Get memories eligible for consolidation."""
         # Would call memory.search() or memory.list()

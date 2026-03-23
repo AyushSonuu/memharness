@@ -33,7 +33,7 @@ Install with: pip install memharness[langchain]
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 # Optional dependency handling for LangChain
 try:
@@ -100,19 +100,19 @@ class MemharnessMemory(BaseChatMemory):
     return_messages: bool
     human_prefix: str
     ai_prefix: str
-    input_key: Optional[str]
-    output_key: Optional[str]
+    input_key: str | None
+    output_key: str | None
 
     def __init__(
         self,
-        harness: "MemoryHarness",
+        harness: MemoryHarness,
         thread_id: str,
         memory_key: str = "history",
         return_messages: bool = True,
         human_prefix: str = "Human",
         ai_prefix: str = "AI",
-        input_key: Optional[str] = None,
-        output_key: Optional[str] = None,
+        input_key: str | None = None,
+        output_key: str | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -149,7 +149,7 @@ class MemharnessMemory(BaseChatMemory):
         self.output_key = output_key
 
     @property
-    def memory_variables(self) -> List[str]:
+    def memory_variables(self) -> list[str]:
         """
         Return the list of memory variable keys.
 
@@ -158,7 +158,7 @@ class MemharnessMemory(BaseChatMemory):
         """
         return [self.memory_key]
 
-    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def load_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """
         Load conversation history from memharness.
 
@@ -181,7 +181,7 @@ class MemharnessMemory(BaseChatMemory):
         else:
             return {self.memory_key: self._format_as_string(memories)}
 
-    async def aload_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def aload_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """
         Async version of load_memory_variables.
 
@@ -198,7 +198,7 @@ class MemharnessMemory(BaseChatMemory):
         else:
             return {self.memory_key: self._format_as_string(memories)}
 
-    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
+    def save_context(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
         """
         Save user input and AI output to memharness.
 
@@ -234,7 +234,7 @@ class MemharnessMemory(BaseChatMemory):
             )
 
     async def asave_context(
-        self, inputs: Dict[str, Any], outputs: Dict[str, Any]
+        self, inputs: dict[str, Any], outputs: dict[str, Any]
     ) -> None:
         """
         Async version of save_context.
@@ -281,7 +281,7 @@ class MemharnessMemory(BaseChatMemory):
         if hasattr(self.harness, 'clear_conversational'):
             await self.harness.clear_conversational(self.thread_id)
 
-    def _get_input_value(self, inputs: Dict[str, Any]) -> Optional[str]:
+    def _get_input_value(self, inputs: dict[str, Any]) -> str | None:
         """
         Extract user input from inputs dict.
 
@@ -305,7 +305,7 @@ class MemharnessMemory(BaseChatMemory):
 
         return None
 
-    def _get_output_value(self, outputs: Dict[str, Any]) -> Optional[str]:
+    def _get_output_value(self, outputs: dict[str, Any]) -> str | None:
         """
         Extract AI output from outputs dict.
 
@@ -330,8 +330,8 @@ class MemharnessMemory(BaseChatMemory):
         return None
 
     def _to_langchain_messages(
-        self, memories: List["MemoryUnit"]
-    ) -> List[BaseMessage]:
+        self, memories: list[MemoryUnit]
+    ) -> list[BaseMessage]:
         """
         Convert MemoryUnits to LangChain message objects.
 
@@ -341,7 +341,7 @@ class MemharnessMemory(BaseChatMemory):
         Returns:
             List of LangChain BaseMessage objects.
         """
-        messages: List[BaseMessage] = []
+        messages: list[BaseMessage] = []
 
         for mem in memories:
             role = mem.metadata.get("role", "user") if mem.metadata else "user"
@@ -359,7 +359,7 @@ class MemharnessMemory(BaseChatMemory):
 
         return messages
 
-    def _format_as_string(self, memories: List["MemoryUnit"]) -> str:
+    def _format_as_string(self, memories: list[MemoryUnit]) -> str:
         """
         Format memories as a conversation string.
 
@@ -369,7 +369,7 @@ class MemharnessMemory(BaseChatMemory):
         Returns:
             Formatted conversation string.
         """
-        lines: List[str] = []
+        lines: list[str] = []
 
         for mem in memories:
             role = mem.metadata.get("role", "user") if mem.metadata else "user"

@@ -16,9 +16,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from memharness.agents.base import AgentConfig, AgentResult, EmbeddedAgent, TriggerType
+from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -113,9 +113,9 @@ class EntityExtractorAgent(EmbeddedAgent):
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         super().__init__(memory, llm, config)
         self._entity_cache: dict[str, ExtractedEntity] = {}
@@ -126,9 +126,9 @@ class EntityExtractorAgent(EmbeddedAgent):
 
     async def run(
         self,
-        content: Optional[str] = None,
-        memory_ids: Optional[list[str]] = None,
-        namespace: Optional[tuple[str, ...]] = None,
+        content: str | None = None,
+        memory_ids: list[str] | None = None,
+        namespace: tuple[str, ...] | None = None,
         batch_mode: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
@@ -220,7 +220,7 @@ class EntityExtractorAgent(EmbeddedAgent):
         self,
         text: str,
         store: bool = True,
-        namespace: Optional[tuple[str, ...]] = None,
+        namespace: tuple[str, ...] | None = None,
     ) -> list[ExtractedEntity]:
         """
         Extract entities from text.
@@ -487,8 +487,8 @@ Entities:"""
 
     async def _get_memories_to_process(
         self,
-        memory_ids: Optional[list[str]],
-        namespace: Optional[tuple[str, ...]],
+        memory_ids: list[str] | None,
+        namespace: tuple[str, ...] | None,
     ) -> list[dict[str, Any]]:
         """Get memories that need entity extraction."""
         if memory_ids:
@@ -503,7 +503,7 @@ Entities:"""
     async def _upsert_entity(
         self,
         entity: ExtractedEntity,
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
     ) -> bool:
         """
         Create or update an entity memory.
@@ -537,7 +537,7 @@ Entities:"""
         # )
         return True
 
-    async def _mark_as_processed(self, memory_id: Optional[str]) -> None:
+    async def _mark_as_processed(self, memory_id: str | None) -> None:
         """Mark a memory as having had entities extracted."""
         if memory_id:
             # Would call memory.update()

@@ -13,11 +13,10 @@ as summarized but not deleted.
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from memharness.agents.base import AgentConfig, AgentResult, EmbeddedAgent, TriggerType
+from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -47,9 +46,9 @@ class SummarizerAgent(EmbeddedAgent):
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         super().__init__(memory, llm, config)
 
@@ -59,8 +58,8 @@ class SummarizerAgent(EmbeddedAgent):
 
     async def run(
         self,
-        thread_id: Optional[str] = None,
-        namespace: Optional[tuple[str, ...]] = None,
+        thread_id: str | None = None,
+        namespace: tuple[str, ...] | None = None,
         force: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
@@ -151,8 +150,8 @@ class SummarizerAgent(EmbeddedAgent):
 
     async def _get_eligible_threads(
         self,
-        thread_id: Optional[str],
-        namespace: Optional[tuple[str, ...]],
+        thread_id: str | None,
+        namespace: tuple[str, ...] | None,
     ) -> list[dict[str, Any]]:
         """Get threads eligible for summarization."""
         # If specific thread requested, return just that
@@ -175,7 +174,7 @@ class SummarizerAgent(EmbeddedAgent):
     async def _get_thread_messages(
         self,
         thread_id: str,
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
     ) -> list[dict[str, Any]]:
         """Get all messages in a thread."""
         try:
@@ -312,7 +311,7 @@ Summary:"""
         thread_id: str,
         content: str,
         source_ids: list[str],
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
         message_count: int,
     ) -> str:
         """Store the summary as a memory unit."""
@@ -347,7 +346,7 @@ Summary:"""
     async def summarize_thread(
         self,
         thread_id: str,
-        namespace: Optional[tuple[str, ...]] = None,
+        namespace: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """
         Convenience method to summarize a specific thread.

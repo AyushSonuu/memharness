@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Coroutine
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -40,7 +41,7 @@ class MemoryToolExecutor:
         # Formatted search results
     """
 
-    def __init__(self, memory: "MemoryHarness") -> None:
+    def __init__(self, memory: MemoryHarness) -> None:
         """
         Initialize the tool executor.
 

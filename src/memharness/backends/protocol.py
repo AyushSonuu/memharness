@@ -4,7 +4,7 @@
 
 """Backend protocol definition for storage backends."""
 
-from typing import Protocol, Optional, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -32,7 +32,7 @@ class BackendProtocol(Protocol):
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> str:
         """Write a memory to storage.
 
@@ -54,7 +54,7 @@ class BackendProtocol(Protocol):
         self,
         namespace: tuple[str, ...],
         key: str
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -73,9 +73,9 @@ class BackendProtocol(Protocol):
         self,
         namespace: tuple[str, ...],
         query: str,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
         k: int = 10,
-        filters: Optional[dict] = None
+        filters: dict | None = None
     ) -> list[dict]:
         """Search memories using text query or embedding similarity.
 
@@ -97,9 +97,9 @@ class BackendProtocol(Protocol):
     async def list(
         self,
         namespace: tuple[str, ...],
-        filters: Optional[dict] = None,
-        order_by: Optional[str] = None,
-        limit: Optional[int] = None
+        filters: dict | None = None,
+        order_by: str | None = None,
+        limit: int | None = None
     ) -> list[dict]:
         """List memories in a namespace with optional filtering.
 
@@ -141,7 +141,7 @@ class BackendProtocol(Protocol):
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> bool:
         """Update an existing memory.
 

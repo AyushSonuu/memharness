@@ -4,12 +4,13 @@ Unit tests for memharness core types.
 Tests MemoryUnit, MemoryType enum, and serialization functionality.
 """
 
-import pytest
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
 import json
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from memharness import MemoryUnit, MemoryType
+import pytest
+
+from memharness import MemoryType, MemoryUnit
 
 
 class TestMemoryType:
@@ -103,7 +104,7 @@ class TestMemoryUnit:
     def test_memory_unit_creation_full(self):
         """Test creating MemoryUnit with all fields."""
         test_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         unit = MemoryUnit(
             id=test_id,

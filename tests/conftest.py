@@ -4,13 +4,13 @@ Pytest fixtures for memharness tests.
 Provides reusable fixtures for testing memory harness with various backends.
 """
 
+from collections.abc import AsyncGenerator
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
-from pathlib import Path
-from typing import AsyncGenerator
 
-from memharness import MemoryHarness, MemoryType, MemoryUnit, Config
-
+from memharness import Config, MemoryHarness, MemoryType, MemoryUnit
 
 # =============================================================================
 # Core Memory Harness Fixtures
@@ -18,7 +18,7 @@ from memharness import MemoryHarness, MemoryType, MemoryUnit, Config
 
 
 @pytest_asyncio.fixture
-async def memory() -> AsyncGenerator[MemoryHarness, None]:
+async def memory() -> AsyncGenerator[MemoryHarness]:
     """
     Create in-memory harness for fast testing.
 
@@ -36,7 +36,7 @@ async def memory() -> AsyncGenerator[MemoryHarness, None]:
 
 
 @pytest_asyncio.fixture
-async def sqlite_memory(tmp_path: Path) -> AsyncGenerator[MemoryHarness, None]:
+async def sqlite_memory(tmp_path: Path) -> AsyncGenerator[MemoryHarness]:
     """
     Create SQLite harness for testing persistence.
 
@@ -58,7 +58,7 @@ async def sqlite_memory(tmp_path: Path) -> AsyncGenerator[MemoryHarness, None]:
 
 
 @pytest_asyncio.fixture
-async def postgres_memory() -> AsyncGenerator[MemoryHarness, None]:
+async def postgres_memory() -> AsyncGenerator[MemoryHarness]:
     """
     Create PostgreSQL harness for integration testing.
 

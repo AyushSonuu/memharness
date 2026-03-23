@@ -6,230 +6,116 @@ All models use Pydantic v2 for validation, serialization, and documentation.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationalConfig(BaseModel):
-    """Configuration for conversational memory type.
-
-    Controls thread limits, TTL behavior, and auto-summarization thresholds
-    for conversational memories.
-    """
+    """Configuration for conversational memory type."""
 
     model_config = ConfigDict(frozen=True)
 
-    max_messages_per_thread: Annotated[
-        int, Field(ge=1, description="Maximum messages allowed per conversation thread")
-    ] = 1000
-
-    default_ttl: Annotated[
-        str | None,
-        Field(
-            description="Default time-to-live for messages (e.g., '7d', '24h'). None means no expiry"
-        ),
-    ] = None
-
-    auto_summarize_threshold: Annotated[
-        int,
-        Field(
-            ge=1, description="Number of messages after which auto-summarization is triggered"
-        ),
-    ] = 50
+    max_messages_per_thread: int = Field(
+        default=1000, ge=1, description="Maximum messages allowed per conversation thread"
+    )
+    default_ttl: str | None = Field(
+        default=None, description="Default TTL for messages (e.g., '7d', '24h'). None means no expiry"
+    )
+    auto_summarize_threshold: int = Field(
+        default=50, ge=1, description="Number of messages after which auto-summarization triggers"
+    )
 
 
 class SummarizationTrigger(BaseModel):
-    """A trigger condition for summarization.
-
-    Defines when summarization should occur based on memory conditions.
-    """
+    """A trigger condition for summarization."""
 
     model_config = ConfigDict(frozen=True)
 
-    condition: Annotated[
-        str, Field(description="Trigger condition expression (e.g., 'age > 7d', 'count > 100')")
-    ]
-
-    memory_type: Annotated[
-        str, Field(description="Memory type this trigger applies to")
-    ]
+    condition: str = Field(description="Trigger condition (e.g., 'age > 7d', 'count > 100')")
+    memory_type: str = Field(description="Memory type this trigger applies to")
 
 
 class SummarizationConfig(BaseModel):
-    """Configuration for the summarization agent.
-
-    Controls when and how memories are summarized, and what happens
-    to original memories after summarization.
-    """
+    """Configuration for the summarization agent."""
 
     model_config = ConfigDict(frozen=True)
 
-    enabled: Annotated[bool, Field(description="Whether summarization is enabled")] = True
-
-    triggers: Annotated[
-        list[SummarizationTrigger],
-        Field(
-            default_factory=list,
-            description="List of trigger conditions for summarization",
-        ),
-    ] = []
-
-    keep_originals: Annotated[
-        bool, Field(description="Whether to keep original memories after summarization")
-    ] = True
-
-    originals_ttl: Annotated[
-        str,
-        Field(description="TTL for original memories after summarization (e.g., '365d')"),
-    ] = "365d"
+    enabled: bool = Field(default=True, description="Whether summarization is enabled")
+    triggers: list[SummarizationTrigger] = Field(default_factory=list, description="Trigger conditions")
+    keep_originals: bool = Field(default=True, description="Keep original memories after summarization")
+    originals_ttl: str = Field(default="365d", description="TTL for originals after summarization")
 
 
 class ConsolidationConfig(BaseModel):
-    """Configuration for the consolidation agent.
-
-    Controls duplicate detection and merging of similar memories.
-    """
+    """Configuration for the consolidation agent."""
 
     model_config = ConfigDict(frozen=True)
 
-    enabled: Annotated[bool, Field(description="Whether consolidation is enabled")] = True
-
-    schedule: Annotated[
-        str, Field(description="Cron expression for consolidation schedule")
-    ] = "0 3 * * *"
-
-    similarity_threshold: Annotated[
-        float,
-        Field(
-            ge=0.0,
-            le=1.0,
-            description="Similarity threshold (0.0-1.0) for considering memories as duplicates",
-        ),
-    ] = 0.9
+    enabled: bool = Field(default=True, description="Whether consolidation is enabled")
+    schedule: str = Field(default="0 3 * * *", description="Cron expression for consolidation schedule")
+    similarity_threshold: float = Field(
+        default=0.9, ge=0.0, le=1.0, description="Similarity threshold for duplicate detection"
+    )
 
 
 class GCConfig(BaseModel):
-    """Configuration for the garbage collection agent.
-
-    Controls archival and deletion of old or stale memories.
-    """
+    """Configuration for the garbage collection agent."""
 
     model_config = ConfigDict(frozen=True)
 
-    enabled: Annotated[bool, Field(description="Whether garbage collection is enabled")] = True
-
-    schedule: Annotated[
-        str, Field(description="Cron expression for GC schedule")
-    ] = "0 4 * * 0"
-
-    archive_after: Annotated[
-        str,
-        Field(description="Duration after which memories are archived (e.g., '90d')"),
-    ] = "90d"
-
-    delete_after: Annotated[
-        str,
-        Field(description="Duration after which archived memories are deleted (e.g., '365d')"),
-    ] = "365d"
+    enabled: bool = Field(default=True, description="Whether garbage collection is enabled")
+    schedule: str = Field(default="0 4 * * 0", description="Cron expression for GC schedule")
+    archive_after: str = Field(default="90d", description="Duration after which memories are archived")
+    delete_after: str = Field(default="365d", description="Duration after which archived memories are deleted")
 
 
 class EntityExtractionConfig(BaseModel):
-    """Configuration for the entity extraction agent.
-
-    Controls how entities are extracted from memories.
-    """
+    """Configuration for the entity extraction agent."""
 
     model_config = ConfigDict(frozen=True)
 
-    enabled: Annotated[bool, Field(description="Whether entity extraction is enabled")] = True
-
-    mode: Annotated[
-        Literal["on_write", "batch", "disabled"],
-        Field(description="Extraction mode: on_write (real-time), batch (scheduled), or disabled"),
-    ] = "on_write"
-
-    types: Annotated[
-        list[str],
-        Field(
-            default_factory=lambda: ["PERSON", "ORG", "PLACE", "CONCEPT"],
-            description="Entity types to extract",
-        ),
-    ] = ["PERSON", "ORG", "PLACE", "CONCEPT"]
+    enabled: bool = Field(default=True, description="Whether entity extraction is enabled")
+    mode: Literal["on_write", "batch", "disabled"] = Field(
+        default="on_write", description="Extraction mode: on_write, batch, or disabled"
+    )
+    types: list[str] = Field(
+        default_factory=lambda: ["PERSON", "ORG", "PLACE", "CONCEPT"],
+        description="Entity types to extract",
+    )
 
 
 class ContextAssemblyConfig(BaseModel):
-    """Configuration for context assembly.
-
-    Controls how memories are assembled into context for agent consumption.
-    """
+    """Configuration for context assembly."""
 
     model_config = ConfigDict(frozen=True)
 
-    default_max_tokens: Annotated[
-        int, Field(ge=1, description="Default maximum tokens for assembled context")
-    ] = 4000
-
-    priorities: Annotated[
-        dict[str, float],
-        Field(
-            default_factory=dict,
-            description="Memory type to priority percentage mapping",
-        ),
-    ] = {}
+    default_max_tokens: int = Field(default=4000, ge=1, description="Default max tokens for context")
+    priorities: dict[str, float] = Field(
+        default_factory=dict, description="Memory type to priority percentage mapping"
+    )
 
 
 class ToolDiscoveryConfig(BaseModel):
-    """Configuration for tool discovery.
-
-    Controls the self-exploration capabilities of agents.
-    """
+    """Configuration for tool discovery."""
 
     model_config = ConfigDict(frozen=True)
 
-    enabled: Annotated[bool, Field(description="Whether tool discovery is enabled")] = True
-
-    max_iterations: Annotated[
-        int, Field(ge=1, description="Maximum iterations for tool discovery exploration")
-    ] = 10
+    enabled: bool = Field(default=True, description="Whether tool discovery is enabled")
+    max_iterations: int = Field(default=10, ge=1, description="Max iterations for tool discovery")
 
 
 class AgentConfig(BaseModel):
-    """Configuration for all embedded AI agents.
-
-    Aggregates configuration for all agent subsystems.
-    """
+    """Configuration for all embedded AI agents."""
 
     model_config = ConfigDict(frozen=True)
 
-    summarizer: Annotated[
-        SummarizationConfig,
-        Field(default_factory=SummarizationConfig, description="Summarization agent config"),
-    ] = SummarizationConfig()
-
-    entity_extractor: Annotated[
-        EntityExtractionConfig,
-        Field(default_factory=EntityExtractionConfig, description="Entity extraction agent config"),
-    ] = EntityExtractionConfig()
-
-    consolidator: Annotated[
-        ConsolidationConfig,
-        Field(default_factory=ConsolidationConfig, description="Consolidation agent config"),
-    ] = ConsolidationConfig()
-
-    gc: Annotated[
-        GCConfig, Field(default_factory=GCConfig, description="Garbage collection agent config")
-    ] = GCConfig()
-
-    context_assembly: Annotated[
-        ContextAssemblyConfig,
-        Field(default_factory=ContextAssemblyConfig, description="Context assembly config"),
-    ] = ContextAssemblyConfig()
-
-    tool_discovery: Annotated[
-        ToolDiscoveryConfig,
-        Field(default_factory=ToolDiscoveryConfig, description="Tool discovery config"),
-    ] = ToolDiscoveryConfig()
+    summarizer: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    entity_extractor: EntityExtractionConfig = Field(default_factory=EntityExtractionConfig)
+    consolidator: ConsolidationConfig = Field(default_factory=ConsolidationConfig)
+    gc: GCConfig = Field(default_factory=GCConfig)
+    context_assembly: ContextAssemblyConfig = Field(default_factory=ContextAssemblyConfig)
+    tool_discovery: ToolDiscoveryConfig = Field(default_factory=ToolDiscoveryConfig)
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -237,13 +123,8 @@ class KnowledgeBaseConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    default_collection: Annotated[
-        str, Field(description="Default collection name for KB memories")
-    ] = "default"
-
-    embedding_model: Annotated[
-        str | None, Field(description="Embedding model to use for vectorization")
-    ] = None
+    default_collection: str = Field(default="default", description="Default collection name")
+    embedding_model: str | None = Field(default=None, description="Embedding model to use")
 
 
 class EntityMemoryConfig(BaseModel):
@@ -251,13 +132,8 @@ class EntityMemoryConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    auto_link: Annotated[
-        bool, Field(description="Automatically link related entities")
-    ] = True
-
-    max_relations_per_entity: Annotated[
-        int, Field(ge=1, description="Maximum relations per entity")
-    ] = 100
+    auto_link: bool = Field(default=True, description="Automatically link related entities")
+    max_relations_per_entity: int = Field(default=100, ge=1, description="Max relations per entity")
 
 
 class WorkflowConfig(BaseModel):
@@ -265,13 +141,8 @@ class WorkflowConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    max_steps_per_workflow: Annotated[
-        int, Field(ge=1, description="Maximum steps per workflow")
-    ] = 1000
-
-    auto_archive_completed: Annotated[
-        bool, Field(description="Auto-archive completed workflows")
-    ] = True
+    max_steps_per_workflow: int = Field(default=1000, ge=1, description="Max steps per workflow")
+    auto_archive_completed: bool = Field(default=True, description="Auto-archive completed workflows")
 
 
 class ToolboxConfig(BaseModel):
@@ -279,9 +150,7 @@ class ToolboxConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    cache_schemas: Annotated[
-        bool, Field(description="Cache tool schemas for faster access")
-    ] = True
+    cache_schemas: bool = Field(default=True, description="Cache tool schemas for faster access")
 
 
 class ToolLogConfig(BaseModel):
@@ -289,13 +158,8 @@ class ToolLogConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    max_logs_per_tool: Annotated[
-        int, Field(ge=1, description="Maximum log entries per tool")
-    ] = 10000
-
-    retention_days: Annotated[
-        int, Field(ge=1, description="Days to retain tool logs")
-    ] = 30
+    max_logs_per_tool: int = Field(default=10000, ge=1, description="Max log entries per tool")
+    retention_days: int = Field(default=30, ge=1, description="Days to retain tool logs")
 
 
 class SkillsConfig(BaseModel):
@@ -303,9 +167,7 @@ class SkillsConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    auto_version: Annotated[
-        bool, Field(description="Automatically version skill updates")
-    ] = True
+    auto_version: bool = Field(default=True, description="Automatically version skill updates")
 
 
 class FileMemoryConfig(BaseModel):
@@ -313,13 +175,8 @@ class FileMemoryConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    max_file_size_mb: Annotated[
-        int, Field(ge=1, description="Maximum file size in MB")
-    ] = 100
-
-    allowed_extensions: Annotated[
-        list[str] | None, Field(description="Allowed file extensions. None allows all")
-    ] = None
+    max_file_size_mb: int = Field(default=100, ge=1, description="Max file size in MB")
+    allowed_extensions: list[str] | None = Field(default=None, description="Allowed file extensions")
 
 
 class PersonaConfig(BaseModel):
@@ -327,9 +184,7 @@ class PersonaConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    max_personas_per_agent: Annotated[
-        int, Field(ge=1, description="Maximum personas per agent")
-    ] = 10
+    max_personas_per_agent: int = Field(default=10, ge=1, description="Max personas per agent")
 
 
 class MemoryTypesConfig(BaseModel):
@@ -337,97 +192,32 @@ class MemoryTypesConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    conversational: Annotated[
-        ConversationalConfig,
-        Field(default_factory=ConversationalConfig, description="Conversational memory config"),
-    ] = ConversationalConfig()
-
-    knowledge_base: Annotated[
-        KnowledgeBaseConfig,
-        Field(default_factory=KnowledgeBaseConfig, description="Knowledge base memory config"),
-    ] = KnowledgeBaseConfig()
-
-    entity: Annotated[
-        EntityMemoryConfig,
-        Field(default_factory=EntityMemoryConfig, description="Entity memory config"),
-    ] = EntityMemoryConfig()
-
-    workflow: Annotated[
-        WorkflowConfig,
-        Field(default_factory=WorkflowConfig, description="Workflow memory config"),
-    ] = WorkflowConfig()
-
-    toolbox: Annotated[
-        ToolboxConfig,
-        Field(default_factory=ToolboxConfig, description="Toolbox memory config"),
-    ] = ToolboxConfig()
-
-    tool_log: Annotated[
-        ToolLogConfig,
-        Field(default_factory=ToolLogConfig, description="Tool log memory config"),
-    ] = ToolLogConfig()
-
-    skills: Annotated[
-        SkillsConfig,
-        Field(default_factory=SkillsConfig, description="Skills memory config"),
-    ] = SkillsConfig()
-
-    file: Annotated[
-        FileMemoryConfig,
-        Field(default_factory=FileMemoryConfig, description="File memory config"),
-    ] = FileMemoryConfig()
-
-    persona: Annotated[
-        PersonaConfig,
-        Field(default_factory=PersonaConfig, description="Persona memory config"),
-    ] = PersonaConfig()
+    conversational: ConversationalConfig = Field(default_factory=ConversationalConfig)
+    knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
+    entity: EntityMemoryConfig = Field(default_factory=EntityMemoryConfig)
+    workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
+    toolbox: ToolboxConfig = Field(default_factory=ToolboxConfig)
+    tool_log: ToolLogConfig = Field(default_factory=ToolLogConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    file: FileMemoryConfig = Field(default_factory=FileMemoryConfig)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
 
 
 class MemharnessConfig(BaseModel):
-    """Root configuration for the memharness package.
-
-    This is the main configuration object that contains all settings
-    for the memory harness system.
-
-    Example:
-        ```python
-        config = MemharnessConfig(
-            backend="postgresql://localhost/memharness",
-            memory_types=MemoryTypesConfig(
-                conversational=ConversationalConfig(max_messages_per_thread=500)
-            ),
-            agents=AgentConfig(
-                summarizer=SummarizationConfig(enabled=True)
-            )
-        )
-        ```
-    """
+    """Root configuration for the memharness package."""
 
     model_config = ConfigDict(frozen=True)
 
-    backend: Annotated[
-        str,
-        Field(
-            description="Backend connection string (e.g., 'postgresql://...', 'sqlite://...')"
-        ),
-    ] = "sqlite:///memharness.db"
-
-    memory_types: Annotated[
-        MemoryTypesConfig,
-        Field(default_factory=MemoryTypesConfig, description="Configuration for all memory types"),
-    ] = MemoryTypesConfig()
-
-    agents: Annotated[
-        AgentConfig,
-        Field(default_factory=AgentConfig, description="Configuration for embedded AI agents"),
-    ] = AgentConfig()
-
-    debug: Annotated[bool, Field(description="Enable debug mode")] = False
-
-    log_level: Annotated[
-        Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        Field(description="Logging level"),
-    ] = "INFO"
+    backend: str = Field(
+        default="sqlite:///memharness.db",
+        description="Backend connection string (e.g., 'postgresql://...', 'sqlite://...')",
+    )
+    memory_types: MemoryTypesConfig = Field(default_factory=MemoryTypesConfig)
+    agents: AgentConfig = Field(default_factory=AgentConfig)
+    debug: bool = Field(default=False, description="Enable debug mode")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="Logging level"
+    )
 
 
 # Alias for backward compatibility

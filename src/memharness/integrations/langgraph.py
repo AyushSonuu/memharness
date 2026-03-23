@@ -32,8 +32,9 @@ Install with: pip install memharness[langgraph]
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, Optional, Sequence, Tuple
+from collections.abc import AsyncIterator, Iterator, Sequence
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 # Optional dependency handling for LangGraph
 try:
@@ -49,13 +50,14 @@ except ImportError:
     LANGGRAPH_AVAILABLE = False
     # Provide stub classes for when langgraph is not installed
     BaseCheckpointSaver = object  # type: ignore[misc, assignment]
-    Checkpoint = Dict[str, Any]  # type: ignore[misc, assignment]
-    CheckpointMetadata = Dict[str, Any]  # type: ignore[misc, assignment]
-    CheckpointTuple = Tuple  # type: ignore[misc, assignment]
-    ChannelVersions = Dict[str, Any]  # type: ignore[misc, assignment]
+    Checkpoint = dict[str, Any]  # type: ignore[misc, assignment]
+    CheckpointMetadata = dict[str, Any]  # type: ignore[misc, assignment]
+    CheckpointTuple = tuple  # type: ignore[misc, assignment]
+    ChannelVersions = dict[str, Any]  # type: ignore[misc, assignment]
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import RunnableConfig
+
     from memharness import MemoryHarness
 
 
@@ -93,9 +95,9 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
     def __init__(
         self,
-        harness: "MemoryHarness",
+        harness: MemoryHarness,
         *,
-        serde: Optional[Any] = None,
+        serde: Any | None = None,
     ) -> None:
         """
         Initialize MemharnessCheckpointer.
@@ -116,7 +118,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         super().__init__(serde=serde)
         self.harness = harness
 
-    def get_tuple(self, config: "RunnableConfig") -> Optional[CheckpointTuple]:
+    def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         """
         Get a checkpoint tuple from storage.
 
@@ -126,10 +128,9 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         Returns:
             CheckpointTuple if found, None otherwise.
         """
-        import asyncio
         return self._run_async(self.aget_tuple(config))
 
-    async def aget_tuple(self, config: "RunnableConfig") -> Optional[CheckpointTuple]:
+    async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         """
         Async version of get_tuple.
 
@@ -203,11 +204,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
     def list(
         self,
-        config: Optional["RunnableConfig"],
+        config: RunnableConfig | None,
         *,
-        filter: Optional[Dict[str, Any]] = None,
-        before: Optional["RunnableConfig"] = None,
-        limit: Optional[int] = None,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
         """
         List checkpoints matching the given criteria.
@@ -221,7 +222,6 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         Yields:
             CheckpointTuple objects.
         """
-        import asyncio
 
         async def _list():
             results = []
@@ -234,11 +234,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
     async def alist(
         self,
-        config: Optional["RunnableConfig"],
+        config: RunnableConfig | None,
         *,
-        filter: Optional[Dict[str, Any]] = None,
-        before: Optional["RunnableConfig"] = None,
-        limit: Optional[int] = None,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:
         """
         Async version of list.
@@ -334,11 +334,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
     def put(
         self,
-        config: "RunnableConfig",
+        config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
-    ) -> "RunnableConfig":
+    ) -> RunnableConfig:
         """
         Store a checkpoint.
 
@@ -351,18 +351,17 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         Returns:
             Updated config with the new checkpoint_id.
         """
-        import asyncio
         return self._run_async(
             self.aput(config, checkpoint, metadata, new_versions)
         )
 
     async def aput(
         self,
-        config: "RunnableConfig",
+        config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
-    ) -> "RunnableConfig":
+    ) -> RunnableConfig:
         """
         Async version of put.
 
@@ -387,7 +386,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         # Serialize checkpoint and metadata
         checkpoint_str = self._serialize_checkpoint(checkpoint)
         metadata_str = self._serialize_metadata(metadata)
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         # Store in workflow memory
         await self.harness.add_workflow(
@@ -412,8 +411,8 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
     def put_writes(
         self,
-        config: "RunnableConfig",
-        writes: Sequence[Tuple[str, Any]],
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
         task_id: str,
     ) -> None:
         """
@@ -424,13 +423,12 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             writes: Sequence of (channel, value) tuples.
             task_id: The task identifier.
         """
-        import asyncio
         self._run_async(self.aput_writes(config, writes, task_id))
 
     async def aput_writes(
         self,
-        config: "RunnableConfig",
-        writes: Sequence[Tuple[str, Any]],
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
         task_id: str,
     ) -> None:
         """
@@ -445,7 +443,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         checkpoint_id = config["configurable"].get("checkpoint_id", "")
 
         workflow_id = self._build_workflow_id(thread_id)
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         # Serialize writes
         writes_data = []
@@ -474,7 +472,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         )
 
     def _build_workflow_id(
-        self, thread_id: str, checkpoint_id: Optional[str] = None
+        self, thread_id: str, checkpoint_id: str | None = None
     ) -> str:
         """
         Build a workflow ID for memharness storage.

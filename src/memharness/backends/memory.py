@@ -4,10 +4,9 @@
 
 """In-memory backend for testing and development."""
 
-from typing import Optional
-from collections import defaultdict
 import copy
 import math
+from collections import defaultdict
 
 
 class InMemoryBackend:
@@ -47,7 +46,7 @@ class InMemoryBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> str:
         """Write a memory to storage.
 
@@ -72,7 +71,7 @@ class InMemoryBackend:
         self,
         namespace: tuple[str, ...],
         key: str
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -89,9 +88,9 @@ class InMemoryBackend:
         self,
         namespace: tuple[str, ...],
         query: str,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
         k: int = 10,
-        filters: Optional[dict] = None
+        filters: dict | None = None
     ) -> list[dict]:
         """Search memories using text query or embedding similarity.
 
@@ -157,9 +156,9 @@ class InMemoryBackend:
     async def list(
         self,
         namespace: tuple[str, ...],
-        filters: Optional[dict] = None,
-        order_by: Optional[str] = None,
-        limit: Optional[int] = None
+        filters: dict | None = None,
+        order_by: str | None = None,
+        limit: int | None = None
     ) -> list[dict]:
         """List memories with optional filtering and ordering.
 
@@ -231,7 +230,7 @@ class InMemoryBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> bool:
         """Update an existing memory.
 

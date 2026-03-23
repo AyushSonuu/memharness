@@ -5,14 +5,12 @@ Tests SQLite-specific functionality including persistence,
 transactions, and schema management.
 """
 
-import pytest
-import pytest_asyncio
-from pathlib import Path
-import os
 import asyncio
+import os
 
-from memharness import MemoryHarness, MemoryType
+import pytest
 
+from memharness import MemoryHarness
 
 # =============================================================================
 # SQLite Connection Tests

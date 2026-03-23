@@ -5,12 +5,10 @@ Tests the complete memory harness functionality including all memory types,
 search operations, and context assembly.
 """
 
+
 import pytest
-import pytest_asyncio
-from datetime import datetime, timezone
 
-from memharness import MemoryHarness, MemoryType, MemoryUnit
-
+from memharness import MemoryHarness
 
 # =============================================================================
 # Conversational Memory Tests
@@ -151,7 +149,7 @@ class TestKnowledgeBase:
         await memory.add_knowledge(
             "Kubernetes orchestrates containers",
             source="docs",
-            tags=["k8s", "devops", "containers"]
+            metadata={"tags": ["k8s", "devops", "containers"]}
         )
 
         results = await memory.search_knowledge("container management", k=1)

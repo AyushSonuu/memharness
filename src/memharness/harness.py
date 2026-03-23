@@ -17,23 +17,20 @@ Example:
 
 from __future__ import annotations
 
-import os
-import uuid
 import json
+import os
 import re
-from datetime import datetime, timezone
-from typing import (
-    Any,
-    Callable,
-    Optional,
-    Protocol,
-    Union,
-    runtime_checkable,
-)
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-
+from typing import (
+    Any,
+    Protocol,
+    runtime_checkable,
+)
 
 # =============================================================================
 # Type Definitions
@@ -64,9 +61,9 @@ class MemoryUnit:
     and associated metadata.
 
     Attributes:
-        id: Unique identifier for this memory unit.
         content: The actual content/text of the memory.
         memory_type: The type of memory (e.g., conversational, knowledge).
+        id: Unique identifier for this memory unit.
         namespace: Hierarchical namespace tuple for organization.
         embedding: Optional vector embedding for similarity search.
         metadata: Additional key-value metadata.
@@ -74,14 +71,14 @@ class MemoryUnit:
         updated_at: Timestamp when the memory was last updated.
     """
 
-    id: str
     content: str
     memory_type: MemoryType
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     namespace: tuple[str, ...] = field(default_factory=tuple)
-    embedding: Optional[list[float]] = None
+    embedding: list[float] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the MemoryUnit to a dictionary."""
@@ -106,9 +103,19 @@ class MemoryUnit:
             namespace=tuple(data.get("namespace", [])),
             embedding=data.get("embedding"),
             metadata=data.get("metadata", {}),
-            created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now(timezone.utc)),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if isinstance(data.get("updated_at"), str) else data.get("updated_at", datetime.now(timezone.utc)),
+            created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now(UTC)),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if isinstance(data.get("updated_at"), str) else data.get("updated_at", datetime.now(UTC)),
         )
+
+    def to_json(self) -> str:
+        """Convert the MemoryUnit to a JSON string."""
+        return json.dumps(self.to_dict())
+
+    @classmethod
+    def from_json(cls, json_str: str) -> MemoryUnit:
+        """Create a MemoryUnit from a JSON string."""
+        data = json.loads(json_str)
+        return cls.from_dict(data)
 
 
 @dataclass
@@ -181,16 +188,16 @@ class BackendProtocol(Protocol):
         """Store a memory unit and return its ID."""
         ...
 
-    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+    async def get(self, memory_id: str) -> MemoryUnit | None:
         """Retrieve a memory unit by ID."""
         ...
 
     async def search(
         self,
         query_embedding: list[float],
-        memory_type: Optional[MemoryType] = None,
-        namespace: Optional[tuple[str, ...]] = None,
-        filters: Optional[dict[str, Any]] = None,
+        memory_type: MemoryType | None = None,
+        namespace: tuple[str, ...] | None = None,
+        filters: dict[str, Any] | None = None,
         k: int = 10,
     ) -> list[MemoryUnit]:
         """Search for memory units by similarity."""
@@ -207,7 +214,7 @@ class BackendProtocol(Protocol):
     async def list_by_namespace(
         self,
         namespace: tuple[str, ...],
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 100,
     ) -> list[MemoryUnit]:
         """List memory units by namespace prefix."""
@@ -243,16 +250,16 @@ class InMemoryBackend:
         self._storage[unit.id] = unit
         return unit.id
 
-    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+    async def get(self, memory_id: str) -> MemoryUnit | None:
         """Retrieve a memory unit by ID."""
         return self._storage.get(memory_id)
 
     async def search(
         self,
         query_embedding: list[float],
-        memory_type: Optional[MemoryType] = None,
-        namespace: Optional[tuple[str, ...]] = None,
-        filters: Optional[dict[str, Any]] = None,
+        memory_type: MemoryType | None = None,
+        namespace: tuple[str, ...] | None = None,
+        filters: dict[str, Any] | None = None,
         k: int = 10,
     ) -> list[MemoryUnit]:
         """Search for memory units using cosine similarity."""
@@ -297,7 +304,7 @@ class InMemoryBackend:
         if "embedding" in updates:
             unit.embedding = updates["embedding"]
 
-        unit.updated_at = datetime.now(timezone.utc)
+        unit.updated_at = datetime.now(UTC)
         return True
 
     async def delete(self, memory_id: str) -> bool:
@@ -310,7 +317,7 @@ class InMemoryBackend:
     async def list_by_namespace(
         self,
         namespace: tuple[str, ...],
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 100,
     ) -> list[MemoryUnit]:
         """List memory units by namespace prefix."""
@@ -501,10 +508,10 @@ class MemoryHarness:
 
     def __init__(
         self,
-        backend: Union[str, BackendProtocol] = "memory://",
-        embedding_fn: Optional[Callable[[str], list[float]]] = None,
-        config: Optional[MemharnessConfig] = None,
-        namespace_prefix: Optional[tuple[str, ...]] = None,
+        backend: str | BackendProtocol = "memory://",
+        embedding_fn: Callable[[str], list[float]] | None = None,
+        config: MemharnessConfig | None = None,
+        namespace_prefix: tuple[str, ...] | None = None,
     ) -> None:
         """
         Initialize a MemoryHarness instance.
@@ -636,9 +643,9 @@ class MemoryHarness:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[Any],
+        exc_type: type | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
     ) -> None:
         """Async context manager exit - disconnects from backend."""
         await self.disconnect()
@@ -668,11 +675,11 @@ class MemoryHarness:
         content: str,
         memory_type: MemoryType,
         namespace: tuple[str, ...],
-        metadata: Optional[dict[str, Any]] = None,
-        embedding: Optional[list[float]] = None,
+        metadata: dict[str, Any] | None = None,
+        embedding: list[float] | None = None,
     ) -> MemoryUnit:
         """Create a new MemoryUnit with generated ID and timestamps."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return MemoryUnit(
             id=self._generate_id(),
             content=content,
@@ -693,7 +700,7 @@ class MemoryHarness:
         thread_id: str,
         role: str,
         content: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add a conversational message to memory.
@@ -774,8 +781,8 @@ class MemoryHarness:
     async def add_knowledge(
         self,
         content: str,
-        source: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        source: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add knowledge to the knowledge base.
@@ -818,7 +825,7 @@ class MemoryHarness:
         self,
         query: str,
         k: int = 5,
-        filters: Optional[dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[MemoryUnit]:
         """
         Search the knowledge base by semantic similarity.
@@ -858,7 +865,7 @@ class MemoryHarness:
         name: str,
         entity_type: str,
         description: str,
-        relationships: Optional[list[dict[str, str]]] = None,
+        relationships: list[dict[str, str]] | None = None,
     ) -> str:
         """
         Add an entity to memory.
@@ -911,7 +918,7 @@ class MemoryHarness:
     async def search_entity(
         self,
         query: str,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         k: int = 5,
     ) -> list[MemoryUnit]:
         """
@@ -956,7 +963,7 @@ class MemoryHarness:
         task: str,
         steps: list[str],
         outcome: str,
-        result: Optional[str] = None,
+        result: str | None = None,
     ) -> str:
         """
         Add a workflow/procedure to memory.
@@ -1285,7 +1292,7 @@ class MemoryHarness:
         self,
         summary: str,
         source_ids: list[str],
-        thread_id: Optional[str] = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Add a summary that references source memories.
@@ -1460,7 +1467,7 @@ class MemoryHarness:
         self,
         name: str,
         description: str,
-        examples: Optional[list[str]] = None,
+        examples: list[str] | None = None,
     ) -> str:
         """
         Add a learned skill to memory.
@@ -1545,8 +1552,8 @@ class MemoryHarness:
     async def add_file(
         self,
         path: str,
-        content_summary: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        content_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add a file reference to memory.
@@ -1676,7 +1683,7 @@ class MemoryHarness:
 
     async def get_persona(
         self,
-        block_name: Optional[str] = None,
+        block_name: str | None = None,
     ) -> str:
         """
         Retrieve persona content.
@@ -1727,9 +1734,9 @@ class MemoryHarness:
     async def add(
         self,
         content: str,
-        memory_type: Optional[str] = None,
-        namespace: Optional[tuple[str, ...]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        memory_type: str | None = None,
+        namespace: tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add a generic memory unit.
@@ -1770,7 +1777,7 @@ class MemoryHarness:
     async def search(
         self,
         query: str,
-        memory_type: Optional[str] = None,
+        memory_type: str | None = None,
         k: int = 10,
     ) -> list[MemoryUnit]:
         """
@@ -1798,7 +1805,7 @@ class MemoryHarness:
             k=k,
         )
 
-    async def get(self, memory_id: str) -> Optional[MemoryUnit]:
+    async def get(self, memory_id: str) -> MemoryUnit | None:
         """
         Retrieve a specific memory by ID.
 
@@ -1820,8 +1827,8 @@ class MemoryHarness:
     async def update(
         self,
         memory_id: str,
-        content: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """
         Update a memory unit.

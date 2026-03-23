@@ -5,9 +5,8 @@ Tests registry functionality including type registration,
 retrieval, and custom type support.
 """
 
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Optional
 
 from memharness import MemoryType, MemoryTypeRegistry
 
@@ -367,7 +366,6 @@ class TestRegistryThreadSafety:
     def test_concurrent_reads(self):
         """Test concurrent reads from registry."""
         import threading
-        import time
 
         registry = MemoryTypeRegistry.get_instance()
         results = []

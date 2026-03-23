@@ -30,9 +30,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Union
 
+from memharness.backends.memory import InMemoryBackend
 from memharness.backends.protocol import BackendProtocol
 from memharness.backends.sqlite import SQLiteBackend, SQLiteBackendError
-from memharness.backends.memory import InMemoryBackend
 
 if TYPE_CHECKING:
     pass
@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 
-def get_backend(connection_string: str) -> Union[SQLiteBackend, InMemoryBackend]:
+def get_backend(connection_string: str) -> SQLiteBackend | InMemoryBackend:
     """Get the appropriate backend based on connection string.
 
     Args:

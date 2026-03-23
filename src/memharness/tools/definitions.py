@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from memharness import MemoryHarness
 
 
-def get_memory_tools(memory: "MemoryHarness") -> list[dict]:
+def get_memory_tools(memory: MemoryHarness) -> list[dict]:
     """
     Returns tool definitions that agents can use to explore their memory.
 
@@ -322,7 +322,7 @@ def get_memory_tools(memory: "MemoryHarness") -> list[dict]:
     ]
 
 
-def get_memory_tools_anthropic(memory: "MemoryHarness") -> list[dict]:
+def get_memory_tools_anthropic(memory: MemoryHarness) -> list[dict]:
     """
     Returns tool definitions in Anthropic's Claude format.
 

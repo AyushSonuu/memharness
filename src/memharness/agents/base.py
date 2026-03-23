@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -128,13 +128,13 @@ class EmbeddedAgent(ABC):
     """
 
     trigger: TriggerType
-    schedule: Optional[str] = None
+    schedule: str | None = None
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         """
         Initialize the agent.
@@ -148,7 +148,7 @@ class EmbeddedAgent(ABC):
         self.llm = llm
         self.config = config or AgentConfig()
         self.enabled = True
-        self._last_run: Optional[datetime] = None
+        self._last_run: datetime | None = None
         self._run_count: int = 0
 
     @property
@@ -183,8 +183,8 @@ class EmbeddedAgent(ABC):
         items_created: int = 0,
         items_updated: int = 0,
         items_deleted: int = 0,
-        errors: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        errors: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Create an AgentResult for this run."""
         return AgentResult(

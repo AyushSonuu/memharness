@@ -14,9 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from memharness.agents.base import AgentConfig, AgentResult, EmbeddedAgent, TriggerType
+from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
 
 if TYPE_CHECKING:
     from memharness import MemoryHarness
@@ -38,7 +38,7 @@ class GCTarget:
     memory_id: str
     action: GCAction
     reason: str
-    age_days: Optional[int] = None
+    age_days: int | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -60,9 +60,9 @@ class GCAgent(EmbeddedAgent):
 
     def __init__(
         self,
-        memory: "MemoryHarness",
-        llm: Optional[Any] = None,
-        config: Optional[AgentConfig] = None,
+        memory: MemoryHarness,
+        llm: Any | None = None,
+        config: AgentConfig | None = None,
     ):
         super().__init__(memory, llm, config)
 
@@ -72,8 +72,8 @@ class GCAgent(EmbeddedAgent):
 
     async def run(
         self,
-        actions: Optional[list[GCAction]] = None,
-        namespace: Optional[tuple[str, ...]] = None,
+        actions: list[GCAction] | None = None,
+        namespace: tuple[str, ...] | None = None,
         dry_run: bool = False,
         **kwargs,
     ) -> dict[str, Any]:
@@ -173,7 +173,7 @@ class GCAgent(EmbeddedAgent):
 
     async def expire_ttl(
         self,
-        namespace: Optional[tuple[str, ...]] = None,
+        namespace: tuple[str, ...] | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -194,8 +194,8 @@ class GCAgent(EmbeddedAgent):
 
     async def archive_old(
         self,
-        namespace: Optional[tuple[str, ...]] = None,
-        age_days: Optional[int] = None,
+        namespace: tuple[str, ...] | None = None,
+        age_days: int | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -229,7 +229,7 @@ class GCAgent(EmbeddedAgent):
 
     async def clean_orphans(
         self,
-        namespace: Optional[tuple[str, ...]] = None,
+        namespace: tuple[str, ...] | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -250,7 +250,7 @@ class GCAgent(EmbeddedAgent):
 
     async def _find_expired(
         self,
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
     ) -> list[GCTarget]:
         """Find memories that have exceeded their TTL."""
         targets: list[GCTarget] = []
@@ -290,7 +290,7 @@ class GCAgent(EmbeddedAgent):
 
     async def _find_archivable(
         self,
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
     ) -> list[GCTarget]:
         """Find memories old enough to archive."""
         targets: list[GCTarget] = []
@@ -339,7 +339,7 @@ class GCAgent(EmbeddedAgent):
 
     async def _find_orphans(
         self,
-        namespace: Optional[tuple[str, ...]],
+        namespace: tuple[str, ...] | None,
     ) -> list[GCTarget]:
         """Find orphaned references (memories pointing to deleted items)."""
         targets: list[GCTarget] = []
@@ -428,7 +428,7 @@ class GCAgent(EmbeddedAgent):
 
     async def get_stats(
         self,
-        namespace: Optional[tuple[str, ...]] = None,
+        namespace: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """
         Get GC statistics without performing any actions.

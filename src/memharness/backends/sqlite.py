@@ -4,14 +4,13 @@
 
 """SQLite backend with async support and vector similarity search."""
 
-from typing import Optional, Any
 import json
-import math
 import logging
+import math
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
-
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ class SQLiteBackend:
             db_path: Path to SQLite database file, or ":memory:" for in-memory
         """
         self._db_path = db_path
-        self._connection: Optional[aiosqlite.Connection] = None
+        self._connection: aiosqlite.Connection | None = None
         self._initialized_tables: set[str] = set()
 
     @property
@@ -174,7 +173,7 @@ class SQLiteBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> str:
         """Write a memory to storage.
 
@@ -215,7 +214,7 @@ class SQLiteBackend:
         self,
         namespace: tuple[str, ...],
         key: str
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -257,9 +256,9 @@ class SQLiteBackend:
         self,
         namespace: tuple[str, ...],
         query: str,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
         k: int = 10,
-        filters: Optional[dict] = None
+        filters: dict | None = None
     ) -> list[dict]:
         """Search memories using text or embedding similarity.
 
@@ -347,9 +346,9 @@ class SQLiteBackend:
     async def list(
         self,
         namespace: tuple[str, ...],
-        filters: Optional[dict] = None,
-        order_by: Optional[str] = None,
-        limit: Optional[int] = None
+        filters: dict | None = None,
+        order_by: str | None = None,
+        limit: int | None = None
     ) -> list[dict]:
         """List memories with optional filtering and ordering.
 
@@ -464,7 +463,7 @@ class SQLiteBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None
+        embedding: list[float] | None = None
     ) -> bool:
         """Update an existing memory.
 

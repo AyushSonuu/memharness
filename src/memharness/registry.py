@@ -13,8 +13,9 @@ The registry comes pre-configured with all 10 built-in memory types but supports
 custom type registration for specialized use cases.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from memharness.types import MemoryType, MemoryUnit, StorageType
 

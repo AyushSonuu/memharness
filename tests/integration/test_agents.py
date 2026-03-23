@@ -5,13 +5,10 @@ Tests embedded agents for complex memory operations like
 summarization, context assembly, and intelligent retrieval.
 """
 
-import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
+from unittest.mock import AsyncMock, patch
 
-from memharness import MemoryHarness, MemoryType
-
+import pytest
 
 # =============================================================================
 # Agent Configuration Tests
@@ -570,7 +567,7 @@ class TestAgentIntegration:
 
             assert context is not None
             # Should include conversation history and relevant knowledge
-        except Exception as e:
+        except Exception:
             # Context assembly might have different signature
             pass
 

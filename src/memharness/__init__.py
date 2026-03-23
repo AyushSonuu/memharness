@@ -19,9 +19,8 @@ Quick Start:
     await memory.add_conversational(thread_id="t1", role="user", content="Hello")
 """
 
-from memharness.harness import MemoryHarness
-from memharness.types import MemoryUnit, MemoryType
 from memharness.config import Config, MemharnessConfig
+from memharness.harness import MemoryHarness, MemoryType, MemoryUnit
 from memharness.registry import MemoryTypeRegistry
 
 __version__ = "0.1.0"

@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -104,7 +104,7 @@ class PostgresBackend:
         self._min_pool_size = min_pool_size
         self._max_pool_size = max_pool_size
         self._vector_dim = vector_dim
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
         self._initialized_tables: set[str] = set()
 
     @property
@@ -719,7 +719,7 @@ class PostgresBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
     ) -> str:
         """Write a memory to storage.
 
@@ -766,7 +766,7 @@ class PostgresBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
     ) -> tuple[list[str], list[Any], list[str]]:
         """Build INSERT parameters based on memory type.
 
@@ -890,7 +890,7 @@ class PostgresBackend:
         self,
         namespace: tuple[str, ...],
         key: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -996,9 +996,9 @@ class PostgresBackend:
         self,
         namespace: tuple[str, ...],
         query: str,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
         k: int = 10,
-        filters: Optional[dict] = None,
+        filters: dict | None = None,
     ) -> list[dict]:
         """Search memories using text query or embedding similarity.
 
@@ -1132,7 +1132,7 @@ class PostgresBackend:
         query: str,
         embedding: list[float],
         k: int = 10,
-        filters: Optional[dict] = None,
+        filters: dict | None = None,
         vector_weight: float = 0.7,
     ) -> list[dict]:
         """Perform hybrid search combining vector similarity and keyword matching.
@@ -1217,9 +1217,9 @@ class PostgresBackend:
     async def list(
         self,
         namespace: tuple[str, ...],
-        filters: Optional[dict] = None,
-        order_by: Optional[str] = None,
-        limit: Optional[int] = None,
+        filters: dict | None = None,
+        order_by: str | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
         """List memories in a namespace with optional filtering.
 
@@ -1304,7 +1304,7 @@ class PostgresBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
     ) -> bool:
         """Update an existing memory.
 
@@ -1388,7 +1388,7 @@ class PostgresBackend:
         self,
         memory_type: MemoryType,
         namespace: tuple[str, ...],
-        filters: Optional[dict],
+        filters: dict | None,
     ) -> tuple[list[str], list[Any]]:
         """Build WHERE clauses from filters.
 
@@ -1490,7 +1490,7 @@ class PostgresBackend:
     async def count(
         self,
         namespace: tuple[str, ...],
-        filters: Optional[dict] = None,
+        filters: dict | None = None,
     ) -> int:
         """Count memories in a namespace.
 
