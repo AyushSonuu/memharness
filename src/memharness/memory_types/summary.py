@@ -106,3 +106,33 @@ class SummaryMixin(BaseMixin):
                 sources.append(source)
 
         return sources
+
+    async def get_summaries_by_thread(self, thread_id: str) -> list[MemoryUnit]:
+        """
+        Retrieve all summaries for a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID.
+
+        Returns:
+            List of summary MemoryUnit objects for the thread,
+            ordered from oldest to newest.
+
+        Example:
+            ```python
+            summaries = await harness.get_summaries_by_thread("chat-123")
+            for summary in summaries:
+                print(f"Summary: {summary.content}")
+            ```
+        """
+        from memharness.types import MemoryType
+
+        namespace = self._build_namespace(MemoryType.SUMMARY, thread_id)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.SUMMARY,
+            limit=100,
+        )
+        # Sort by created_at ascending (oldest first)
+        results.sort(key=lambda u: u.created_at)
+        return results

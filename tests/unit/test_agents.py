@@ -21,6 +21,9 @@ def mock_harness():
     """Create a mock MemoryHarness for testing."""
     harness = MagicMock()
     harness.get_conversational = AsyncMock(return_value=[])
+    harness.add_summary = AsyncMock(return_value="summary-123")
+    harness._backend = MagicMock()
+    harness._backend.update = AsyncMock(return_value=True)
     return harness
 
 
@@ -55,36 +58,73 @@ def sample_messages():
 class TestSummarizerAgent:
     """Tests for SummarizerAgent."""
 
-    async def test_heuristic_summary(self, mock_harness, sample_messages):
-        """Test summarizer without LLM (heuristic mode)."""
-        mock_harness.get_conversational.return_value = sample_messages
+    async def test_heuristic_summary(self, mock_harness):
+        """Test summarizer without LLM (heuristic mode) with enough messages."""
+        from memharness.types import MemoryType, MemoryUnit
+
+        # Create 12 messages (> 10 threshold)
+        messages = [
+            MemoryUnit(
+                id=f"msg{i}",
+                memory_type=MemoryType.CONVERSATIONAL,
+                content=f"Message {i}",
+                embedding=[0.1 * i] * 384,
+                metadata={"role": "user" if i % 2 == 0 else "assistant"},
+            )
+            for i in range(12)
+        ]
+
+        mock_harness.get_conversational.return_value = messages
         agent = SummarizerAgent(mock_harness)
 
-        summary = await agent.summarize_thread("thread1", max_messages=50)
+        result = await agent.summarize_thread("thread1", max_messages=50)
 
-        assert "3 message(s)" in summary
-        assert "Hello" in summary
+        # Now returns a dict with summarization results
+        assert result["summarized"] is True
+        assert "12 message(s)" in result["summary_text"]
+        assert "Message 0" in result["summary_text"]
+        assert result["messages_summarized"] == 12
+        assert result["summary_id"] == "summary-123"
         assert mock_harness.get_conversational.called
+        assert mock_harness.add_summary.called
+        assert mock_harness._backend.update.called
 
     async def test_empty_thread(self, mock_harness):
         """Test summarizer with empty thread."""
         mock_harness.get_conversational.return_value = []
         agent = SummarizerAgent(mock_harness)
 
-        summary = await agent.summarize_thread("thread1")
+        result = await agent.summarize_thread("thread1")
 
-        assert summary == ""
+        # With 0 messages, should return not summarized
+        assert result["summarized"] is False
+        assert result["reason"] == "too_few_messages"
 
-    async def test_run_method(self, mock_harness, sample_messages):
-        """Test the run method."""
-        mock_harness.get_conversational.return_value = sample_messages
+    async def test_run_method(self, mock_harness):
+        """Test the run method with enough messages."""
+        from memharness.types import MemoryType, MemoryUnit
+
+        # Create 10 messages (exactly at threshold)
+        messages = [
+            MemoryUnit(
+                id=f"msg{i}",
+                memory_type=MemoryType.CONVERSATIONAL,
+                content=f"Message {i}",
+                embedding=[0.1 * i] * 384,
+                metadata={"role": "user" if i % 2 == 0 else "assistant"},
+            )
+            for i in range(10)
+        ]
+
+        mock_harness.get_conversational.return_value = messages
         agent = SummarizerAgent(mock_harness)
 
         result = await agent.run("thread1", max_messages=50)
 
-        assert "summary" in result
-        assert "message_count" in result
-        assert result["message_count"] == 3
+        # run() now delegates to summarize_thread(), returns dict
+        assert result["summarized"] is True
+        assert result["messages_summarized"] == 10
+        assert result["summary_id"] == "summary-123"
 
 
 class TestEntityExtractorAgent:

@@ -263,17 +263,12 @@ class TestMemoryTools:
 
     async def test_summarize_and_store_tool(self, harness):
         """Test SummarizeAndStoreTool."""
-        # Add some conversation messages
-        await harness.add_conversational("thread1", "user", "What is Python?")
-        await harness.add_conversational(
-            "thread1", "assistant", "Python is a high-level programming language."
-        )
-        await harness.add_conversational("thread1", "user", "What is it used for?")
-        await harness.add_conversational(
-            "thread1",
-            "assistant",
-            "It's used for web development, data science, automation, and more.",
-        )
+        # Add enough conversation messages (at least 10)
+        for i in range(12):
+            role = "user" if i % 2 == 0 else "assistant"
+            await harness.add_conversational(
+                "thread1", role, f"Message {i + 1}: This is test content."
+            )
 
         tool = SummarizeAndStoreTool(harness=harness)
 
@@ -291,7 +286,7 @@ class TestMemoryTools:
         # Test with non-existent thread
         result = await tool._arun(thread_id="empty-thread", max_messages=50)
         assert isinstance(result, str)
-        assert "No messages found" in result
+        assert "Not enough messages" in result or "Could not summarize" in result
 
     async def test_summarize_and_store_tool_sync_not_implemented(self, harness):
         """Test that SummarizeAndStoreTool sync method raises NotImplementedError."""

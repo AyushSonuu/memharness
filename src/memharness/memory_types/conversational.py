@@ -81,12 +81,16 @@ class ConversationalMixin(BaseMixin):
         """
         Retrieve conversation history for a thread.
 
+        Returns only unsummarized messages (those without a 'summary_id' in metadata).
+        After summarization, messages are marked with summary_id and excluded from
+        subsequent retrievals to prevent redundant context.
+
         Args:
             thread_id: The conversation thread ID.
             limit: Maximum number of messages to retrieve.
 
         Returns:
-            List of MemoryUnit objects representing the conversation,
+            List of unsummarized MemoryUnit objects representing the conversation,
             ordered from oldest to newest.
 
         Example:
@@ -104,6 +108,8 @@ class ConversationalMixin(BaseMixin):
             memory_type=MemoryType.CONVERSATIONAL,
             limit=limit,
         )
+        # Filter out summarized messages (where metadata.summary_id is set)
+        unsummarized = [m for m in results if not m.metadata.get("summary_id")]
         # Sort by created_at ascending (oldest first)
-        results.sort(key=lambda u: u.created_at)
-        return results
+        unsummarized.sort(key=lambda u: u.created_at)
+        return unsummarized
