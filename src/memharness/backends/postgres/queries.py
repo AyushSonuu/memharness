@@ -2,37 +2,13 @@
 # Copyright (c) 2026 Ayush Sonuu
 # Licensed under MIT License
 
-"""PostgreSQL backend with pgvector support for memharness.
+"""PostgreSQL query execution for memharness.
 
-This module provides a production-ready PostgreSQL backend with:
-- Async operations via asyncpg with connection pooling
-- Vector similarity search using pgvector extension
-- Separate table schemas for SQL and Vector memory types
-- HNSW indexes for efficient vector search
-- Full-text search capabilities via pg_trgm
-- Hybrid search combining semantic and keyword matching
-
-Example:
-    backend = PostgresBackend("postgresql://user:pass@localhost/db")
-    await backend.connect()
-
-    # Write to knowledge base (vector search enabled)
-    await backend.write(
-        namespace=("kb",),
-        key="doc_001",
-        value={"content": "PostgreSQL is powerful", "source": "docs"},
-        embedding=[0.1, 0.2, 0.3, ...]
-    )
-
-    # Search by embedding similarity
-    results = await backend.search(
-        namespace=("kb",),
-        query="database",
-        embedding=[0.1, 0.2, 0.3, ...],
-        k=5
-    )
-
-    await backend.disconnect()
+This module handles all database query operations including:
+- CRUD operations (write, read, update, delete)
+- Search operations (vector, text, hybrid)
+- Filtering and listing
+- Helper utilities
 """
 
 from __future__ import annotations
@@ -40,618 +16,37 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any
-
-import asyncpg
-from pgvector.asyncpg import register_vector
+from typing import TYPE_CHECKING, Any
 
 from memharness.types import MemoryType
 
+if TYPE_CHECKING:
+    import asyncpg
+
+    from memharness.backends.postgres.connection import (
+        PostgresConnectionManager,
+    )
+
 logger = logging.getLogger(__name__)
 
-# Default vector dimension for embeddings
-DEFAULT_VECTOR_DIM = 768
 
+class PostgresQueryExecutor:
+    """Handles all query execution for PostgreSQL backend.
 
-class PostgresBackendError(Exception):
-    """Exception raised for PostgreSQL backend errors."""
-
-    pass
-
-
-class PostgresBackend:
-    """PostgreSQL storage backend with pgvector support.
-
-    Features:
-    - Async operations via asyncpg with connection pooling
-    - SQL tables for conversational and tool_log (with indexes on thread_id, timestamp)
-    - Vector tables for other memory types with HNSW indexes
-    - Hybrid search combining vector similarity and keyword matching
-    - JSONB metadata storage for flexible filtering
-    - Automatic schema creation and migration
-
-    The backend creates separate tables for each memory type:
-    - conversational_memory: SQL-based with thread_id/timestamp indexes
-    - tool_log_memory: SQL-based audit trail
-    - knowledge_base_memory: Vector-based with HNSW index
-    - entity_memory: Vector-based for named entities
-    - workflow_memory: Vector-based for procedures
-    - toolbox_memory: Vector-based with VFS path support
-    - summary_memory: Vector-based compressed representations
-    - skills_memory: Vector-based learned capabilities
-    - file_memory: Hybrid vector + file metadata
-    - persona_memory: Vector-based agent identity
+    This class provides:
+    - CRUD operations
+    - Vector and text search
+    - Hybrid search combining semantic + keyword matching
+    - Bulk operations and utilities
     """
 
-    def __init__(
-        self,
-        connection_string: str,
-        *,
-        min_pool_size: int = 5,
-        max_pool_size: int = 20,
-        vector_dim: int = DEFAULT_VECTOR_DIM,
-    ) -> None:
-        """Initialize the PostgreSQL backend.
+    def __init__(self, conn_manager: PostgresConnectionManager) -> None:
+        """Initialize query executor.
 
         Args:
-            connection_string: PostgreSQL connection URL
-                (e.g., "postgresql://user:pass@localhost:5432/dbname")
-            min_pool_size: Minimum connections in pool (default: 5)
-            max_pool_size: Maximum connections in pool (default: 20)
-            vector_dim: Dimension of embedding vectors (default: 768)
+            conn_manager: Connection manager instance
         """
-        self._connection_string = connection_string
-        self._min_pool_size = min_pool_size
-        self._max_pool_size = max_pool_size
-        self._vector_dim = vector_dim
-        self._pool: asyncpg.Pool | None = None
-        self._initialized_tables: set[str] = set()
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if backend is connected."""
-        return self._pool is not None
-
-    @property
-    def pool(self) -> asyncpg.Pool:
-        """Get the connection pool, raising if not connected."""
-        if self._pool is None:
-            raise PostgresBackendError("Backend not connected. Call connect() first.")
-        return self._pool
-
-    async def connect(self) -> None:
-        """Initialize connection pool and create database schema.
-
-        Creates:
-        - pgvector extension for vector operations
-        - pg_trgm extension for text similarity
-        - All memory type tables with appropriate schemas
-        - Indexes for efficient querying (B-tree, GIN, HNSW)
-
-        Raises:
-            PostgresBackendError: If connection fails
-        """
-        if self._pool is not None:
-            return
-
-        try:
-            logger.info("Connecting to PostgreSQL...")
-
-            # Create connection pool with vector type registration
-            self._pool = await asyncpg.create_pool(
-                self._connection_string,
-                min_size=self._min_pool_size,
-                max_size=self._max_pool_size,
-                init=self._init_connection,
-            )
-
-            # Initialize database schema
-            await self._create_extensions()
-            await self._create_all_tables()
-
-            logger.info("PostgreSQL backend connected and schema initialized")
-
-        except Exception as e:
-            raise PostgresBackendError(f"Failed to connect to database: {e}") from e
-
-    async def _init_connection(self, conn: asyncpg.Connection) -> None:
-        """Initialize each connection with pgvector support."""
-        await register_vector(conn)
-
-    async def disconnect(self) -> None:
-        """Close the connection pool.
-
-        Raises:
-            PostgresBackendError: If disconnect fails
-        """
-        if self._pool is not None:
-            try:
-                await self._pool.close()
-                logger.info("PostgreSQL backend disconnected")
-            except Exception as e:
-                logger.error(f"Error closing connection pool: {e}")
-            finally:
-                self._pool = None
-                self._initialized_tables.clear()
-
-    # =========================================================================
-    # Schema Creation
-    # =========================================================================
-
-    async def _create_extensions(self) -> None:
-        """Create required PostgreSQL extensions."""
-        async with self.pool.acquire() as conn:
-            # pgvector for vector similarity search
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            # pg_trgm for text similarity (used in hybrid search)
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-
-    async def _create_all_tables(self) -> None:
-        """Create all memory type tables."""
-        async with self.pool.acquire() as conn:
-            # SQL-based tables (conversational, tool_log)
-            await self._create_conversational_table(conn)
-            await self._create_tool_log_table(conn)
-
-            # Vector-based tables
-            await self._create_summary_table(conn)
-            await self._create_knowledge_base_table(conn)
-            await self._create_entity_table(conn)
-            await self._create_workflow_table(conn)
-            await self._create_toolbox_table(conn)
-            await self._create_skills_table(conn)
-            await self._create_file_table(conn)
-            await self._create_persona_table(conn)
-
-            # Add foreign key constraint after both tables exist
-            await self._add_summary_foreign_key(conn)
-
-    async def _create_conversational_table(self, conn: asyncpg.Connection) -> None:
-        """Create conversational memory table (SQL-based)."""
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS conversational_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{}',
-                thread_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                metadata JSONB DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                summary_id UUID
-            )
-        """)
-
-        # Composite index on thread_id and created_at for efficient conversation retrieval
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_thread_time
-            ON conversational_memory(thread_id, created_at DESC)
-        """)
-
-        # GIN index on namespace array for containment queries
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_namespace
-            ON conversational_memory USING GIN(namespace)
-        """)
-
-        # Index on summary_id for finding original messages from summaries
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_summary
-            ON conversational_memory(summary_id) WHERE summary_id IS NOT NULL
-        """)
-
-        # Index on key for fast lookups
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_key
-            ON conversational_memory(key)
-        """)
-
-        self._initialized_tables.add("conversational_memory")
-
-    async def _create_tool_log_table(self, conn: asyncpg.Connection) -> None:
-        """Create tool log memory table (SQL-based audit trail)."""
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS tool_log_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{}',
-                thread_id TEXT NOT NULL,
-                tool_name TEXT NOT NULL,
-                content TEXT NOT NULL,
-                metadata JSONB DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        # Composite index for retrieving tool logs by thread
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_tool_log_thread_time
-            ON tool_log_memory(thread_id, created_at DESC)
-        """)
-
-        # Index on tool_name for filtering by specific tools
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_tool_log_tool
-            ON tool_log_memory(tool_name)
-        """)
-
-        # GIN index on namespace
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_tool_log_namespace
-            ON tool_log_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_tool_log_key
-            ON tool_log_memory(key)
-        """)
-
-        self._initialized_tables.add("tool_log_memory")
-
-    async def _create_summary_table(self, conn: asyncpg.Connection) -> None:
-        """Create summary memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS summary_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                thread_id TEXT,
-                start_time TIMESTAMPTZ,
-                end_time TIMESTAMPTZ,
-                message_count INTEGER DEFAULT 0,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        # HNSW index for fast approximate nearest neighbor search
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_summary_embedding
-            ON summary_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_summary_thread
-            ON summary_memory(thread_id)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_summary_namespace
-            ON summary_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_summary_key
-            ON summary_memory(key)
-        """)
-
-        # Trigram index for text similarity in hybrid search
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_summary_content_trgm
-            ON summary_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("summary_memory")
-
-    async def _add_summary_foreign_key(self, conn: asyncpg.Connection) -> None:
-        """Add foreign key from conversational to summary after both tables exist."""
-        await conn.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'fk_conv_summary'
-                ) THEN
-                    ALTER TABLE conversational_memory
-                    ADD CONSTRAINT fk_conv_summary
-                    FOREIGN KEY (summary_id) REFERENCES summary_memory(id)
-                    ON DELETE SET NULL;
-                END IF;
-            END $$;
-        """)
-
-    async def _create_knowledge_base_table(self, conn: asyncpg.Connection) -> None:
-        """Create knowledge base memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS knowledge_base_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                source TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_kb_embedding
-            ON knowledge_base_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_kb_source
-            ON knowledge_base_memory(source)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_kb_namespace
-            ON knowledge_base_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_kb_key
-            ON knowledge_base_memory(key)
-        """)
-
-        # Trigram index for text similarity
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_kb_content_trgm
-            ON knowledge_base_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("knowledge_base_memory")
-
-    async def _create_entity_table(self, conn: asyncpg.Connection) -> None:
-        """Create entity memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS entity_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                entity_type TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_entity_embedding
-            ON entity_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_entity_type
-            ON entity_memory(entity_type)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_entity_namespace
-            ON entity_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_entity_key
-            ON entity_memory(key)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_entity_content_trgm
-            ON entity_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("entity_memory")
-
-    async def _create_workflow_table(self, conn: asyncpg.Connection) -> None:
-        """Create workflow memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS workflow_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_workflow_embedding
-            ON workflow_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_workflow_namespace
-            ON workflow_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_workflow_key
-            ON workflow_memory(key)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_workflow_content_trgm
-            ON workflow_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("workflow_memory")
-
-    async def _create_toolbox_table(self, conn: asyncpg.Connection) -> None:
-        """Create toolbox memory table (Vector-based with VFS path)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS toolbox_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                tool_name TEXT NOT NULL,
-                vfs_path TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_toolbox_embedding
-            ON toolbox_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_toolbox_tool_name
-            ON toolbox_memory(tool_name)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_toolbox_vfs_path
-            ON toolbox_memory(vfs_path)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_toolbox_namespace
-            ON toolbox_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_toolbox_key
-            ON toolbox_memory(key)
-        """)
-
-        self._initialized_tables.add("toolbox_memory")
-
-    async def _create_skills_table(self, conn: asyncpg.Connection) -> None:
-        """Create skills memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS skills_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                skill_name TEXT NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_embedding
-            ON skills_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_name
-            ON skills_memory(skill_name)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_namespace
-            ON skills_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_key
-            ON skills_memory(key)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_content_trgm
-            ON skills_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("skills_memory")
-
-    async def _create_file_table(self, conn: asyncpg.Connection) -> None:
-        """Create file memory table (Hybrid - Vector + metadata)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS file_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                source TEXT,
-                file_path TEXT NOT NULL,
-                file_hash TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_embedding
-            ON file_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_path
-            ON file_memory(file_path)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_hash
-            ON file_memory(file_hash)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_namespace
-            ON file_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_key
-            ON file_memory(key)
-        """)
-
-        self._initialized_tables.add("file_memory")
-
-    async def _create_persona_table(self, conn: asyncpg.Connection) -> None:
-        """Create persona memory table (Vector-based)."""
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS persona_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({self._vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                persona_name TEXT NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_persona_embedding
-            ON persona_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_persona_name
-            ON persona_memory(persona_name)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_persona_namespace
-            ON persona_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_persona_key
-            ON persona_memory(key)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_persona_content_trgm
-            ON persona_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("persona_memory")
+        self._conn_manager = conn_manager
 
     # =========================================================================
     # Namespace/Table Resolution
@@ -671,6 +66,8 @@ class PostgresBackend:
         Raises:
             PostgresBackendError: If namespace cannot be resolved to a memory type
         """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
         if not namespace:
             raise PostgresBackendError("Namespace cannot be empty")
 
@@ -711,7 +108,7 @@ class PostgresBackend:
         return memory_type.table_name
 
     # =========================================================================
-    # CRUD Operations (BackendProtocol Implementation)
+    # CRUD Operations
     # =========================================================================
 
     async def write(
@@ -724,7 +121,7 @@ class PostgresBackend:
         """Write a memory to storage.
 
         Args:
-            namespace: Hierarchical namespace tuple (e.g., ("kb",), ("conv", "thread_1"))
+            namespace: Hierarchical namespace tuple
             key: Unique identifier within the namespace
             value: Memory data as a dictionary
             embedding: Optional embedding vector for semantic search
@@ -735,6 +132,8 @@ class PostgresBackend:
         Raises:
             PostgresBackendError: If write operation fails
         """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
         memory_type = self._namespace_to_memory_type(namespace)
         table_name = memory_type.table_name
 
@@ -752,7 +151,7 @@ class PostgresBackend:
                 RETURNING id
             """
 
-            async with self.pool.acquire() as conn:
+            async with self._conn_manager.pool.acquire() as conn:
                 row = await conn.fetchrow(query, *values)
                 logger.debug(f"Wrote memory {key} to {table_name} with id {row['id']}")
                 return key
@@ -905,11 +304,13 @@ class PostgresBackend:
         Raises:
             PostgresBackendError: If read operation fails
         """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
         memory_type = self._namespace_to_memory_type(namespace)
         table_name = memory_type.table_name
 
         try:
-            async with self.pool.acquire() as conn:
+            async with self._conn_manager.pool.acquire() as conn:
                 row = await conn.fetchrow(
                     f"SELECT * FROM {table_name} WHERE key = $1",
                     key,
@@ -994,313 +395,6 @@ class PostgresBackend:
 
         return result
 
-    async def search(
-        self,
-        namespace: tuple[str, ...],
-        query: str,
-        embedding: list[float] | None = None,
-        k: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
-        """Search memories using text query or embedding similarity.
-
-        For vector-enabled memory types (knowledge_base, entity, etc.):
-        - If embedding is provided, uses pgvector's <=> operator for cosine distance
-        - Falls back to text similarity using pg_trgm if no embedding
-
-        For SQL-only types (conversational, tool_log):
-        - Uses LIKE-based text search on content
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            query: Text query for search
-            embedding: Optional embedding vector for semantic similarity search
-            k: Maximum number of results to return (default: 10)
-            filters: Optional filters (e.g., {"thread_id": "t1", "source": "docs"})
-
-        Returns:
-            List of matching memory dictionaries, ordered by relevance
-
-        Raises:
-            PostgresBackendError: If search operation fails
-        """
-        memory_type = self._namespace_to_memory_type(namespace)
-        table_name = memory_type.table_name
-
-        try:
-            # Build filter conditions
-            where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
-
-            # Vector search for vector-enabled types
-            if memory_type.uses_vector and embedding:
-                return await self._vector_search(
-                    table_name, memory_type, embedding, k, where_clauses, params
-                )
-
-            # Text-based search fallback
-            return await self._text_search(table_name, memory_type, query, k, where_clauses, params)
-
-        except Exception as e:
-            raise PostgresBackendError(f"Failed to search memories: {e}") from e
-
-    async def _vector_search(
-        self,
-        table_name: str,
-        memory_type: MemoryType,
-        embedding: list[float],
-        k: int,
-        where_clauses: list[str],
-        params: list[Any],
-    ) -> list[dict]:
-        """Perform vector similarity search using pgvector."""
-        # Embedding is the first parameter
-        params.insert(0, embedding)
-
-        # Adjust parameter indices in where clauses
-        adjusted_clauses = []
-        for clause in where_clauses:
-            adjusted = clause
-            for i in range(len(params), 0, -1):
-                adjusted = adjusted.replace(f"${i}", f"${i + 1}")
-            adjusted_clauses.append(adjusted)
-
-        f"WHERE {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""
-
-        query = f"""
-            SELECT *, (embedding <=> $1) AS distance
-            FROM {table_name}
-            WHERE embedding IS NOT NULL
-            {f"AND {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""}
-            ORDER BY distance
-            LIMIT {k}
-        """
-
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
-
-            results = []
-            for row in rows:
-                result = self._row_to_dict(memory_type, row)
-                result["_score"] = 1 - float(row["distance"])  # Convert distance to similarity
-                result["_distance"] = float(row["distance"])
-                results.append(result)
-
-            return results
-
-    async def _text_search(
-        self,
-        table_name: str,
-        memory_type: MemoryType,
-        query: str,
-        k: int,
-        where_clauses: list[str],
-        params: list[Any],
-    ) -> list[dict]:
-        """Perform text-based search using LIKE or pg_trgm similarity."""
-        if query:
-            param_idx = len(params) + 1
-
-            if memory_type.uses_vector:
-                # Use pg_trgm similarity for vector-enabled tables
-                where_clauses.append(f"similarity(content, ${param_idx}) > 0.1")
-                params.append(query)
-                order_clause = f"ORDER BY similarity(content, ${param_idx}) DESC"
-            else:
-                # Use LIKE for SQL-only tables
-                where_clauses.append(f"content ILIKE ${param_idx}")
-                params.append(f"%{query}%")
-                order_clause = "ORDER BY created_at DESC"
-        else:
-            order_clause = "ORDER BY created_at DESC"
-
-        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
-        sql = f"""
-            SELECT * FROM {table_name}
-            {where_sql}
-            {order_clause}
-            LIMIT {k}
-        """
-
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(sql, *params)
-            return [self._row_to_dict(memory_type, row) for row in rows]
-
-    async def hybrid_search(
-        self,
-        namespace: tuple[str, ...],
-        query: str,
-        embedding: list[float],
-        k: int = 10,
-        filters: dict | None = None,
-        vector_weight: float = 0.7,
-    ) -> list[dict]:
-        """Perform hybrid search combining vector similarity and keyword matching.
-
-        Uses pgvector for semantic similarity and pg_trgm for keyword matching,
-        then combines scores with configurable weighting.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            query: Text query for keyword search
-            embedding: Embedding vector for semantic search
-            k: Maximum number of results (default: 10)
-            filters: Optional filters to apply
-            vector_weight: Weight for vector similarity (0-1), keyword = 1 - vector_weight
-
-        Returns:
-            List of matching memory dictionaries, ordered by combined score
-
-        Raises:
-            PostgresBackendError: If memory type doesn't support vector search
-        """
-        memory_type = self._namespace_to_memory_type(namespace)
-
-        if not memory_type.uses_vector:
-            raise PostgresBackendError(
-                f"Memory type {memory_type.value} does not support hybrid search"
-            )
-
-        table_name = memory_type.table_name
-        keyword_weight = 1 - vector_weight
-
-        try:
-            # Build filter conditions
-            where_clauses, filter_params = self._build_filter_clauses(
-                memory_type, namespace, filters
-            )
-
-            # Parameters: $1 = embedding, $2 = keyword_query
-            params = [embedding, query] + filter_params
-
-            # Adjust filter parameter indices
-            adjusted_clauses = []
-            for clause in where_clauses:
-                adjusted = clause
-                for i in range(len(filter_params), 0, -1):
-                    adjusted = adjusted.replace(f"${i}", f"${i + 2}")
-                adjusted_clauses.append(adjusted)
-
-            filter_sql = f"AND {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""
-
-            sql = f"""
-                WITH scored AS (
-                    SELECT *,
-                        (1 - (embedding <=> $1)) AS vector_score,
-                        COALESCE(similarity(content, $2), 0) AS keyword_score
-                    FROM {table_name}
-                    WHERE embedding IS NOT NULL
-                    {filter_sql}
-                )
-                SELECT *,
-                    (vector_score * {vector_weight} + keyword_score * {keyword_weight}) AS combined_score
-                FROM scored
-                WHERE keyword_score > 0.1 OR vector_score > 0.5
-                ORDER BY combined_score DESC
-                LIMIT {k}
-            """
-
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch(sql, *params)
-
-                results = []
-                for row in rows:
-                    result = self._row_to_dict(memory_type, row)
-                    result["_score"] = float(row["combined_score"])
-                    result["_vector_score"] = float(row["vector_score"])
-                    result["_keyword_score"] = float(row["keyword_score"])
-                    results.append(result)
-
-                return results
-
-        except Exception as e:
-            raise PostgresBackendError(f"Failed to perform hybrid search: {e}") from e
-
-    async def list(
-        self,
-        namespace: tuple[str, ...],
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int | None = None,
-    ) -> list[dict]:
-        """List memories in a namespace with optional filtering.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            filters: Optional filters (e.g., {"thread_id": "t1"})
-            order_by: Field to order by (prefix with - for descending, e.g., "-created_at")
-            limit: Maximum number of results
-
-        Returns:
-            List of memory dictionaries
-
-        Raises:
-            PostgresBackendError: If list operation fails
-        """
-        memory_type = self._namespace_to_memory_type(namespace)
-        table_name = memory_type.table_name
-
-        try:
-            where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
-            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
-            # Build ORDER BY clause
-            if order_by:
-                descending = order_by.startswith("-")
-                field = order_by[1:] if descending else order_by
-                direction = "DESC" if descending else "ASC"
-                order_sql = f"ORDER BY {field} {direction}"
-            else:
-                order_sql = "ORDER BY created_at DESC"
-
-            # Build LIMIT clause
-            limit_sql = f"LIMIT {limit}" if limit else ""
-
-            sql = f"""
-                SELECT * FROM {table_name}
-                {where_sql}
-                {order_sql}
-                {limit_sql}
-            """
-
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch(sql, *params)
-                return [self._row_to_dict(memory_type, row) for row in rows]
-
-        except Exception as e:
-            raise PostgresBackendError(f"Failed to list memories: {e}") from e
-
-    async def delete(
-        self,
-        namespace: tuple[str, ...],
-        key: str,
-    ) -> bool:
-        """Delete a memory by key.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier within the namespace
-
-        Returns:
-            True if memory was deleted, False if not found
-
-        Raises:
-            PostgresBackendError: If delete operation fails
-        """
-        memory_type = self._namespace_to_memory_type(namespace)
-        table_name = memory_type.table_name
-
-        try:
-            async with self.pool.acquire() as conn:
-                result = await conn.execute(
-                    f"DELETE FROM {table_name} WHERE key = $1",
-                    key,
-                )
-                return result == "DELETE 1"
-
-        except Exception as e:
-            raise PostgresBackendError(f"Failed to delete memory: {e}") from e
-
     async def update(
         self,
         namespace: tuple[str, ...],
@@ -1322,6 +416,8 @@ class PostgresBackend:
         Raises:
             PostgresBackendError: If update operation fails
         """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
         memory_type = self._namespace_to_memory_type(namespace)
         table_name = memory_type.table_name
 
@@ -1379,12 +475,333 @@ class PostgresBackend:
                 WHERE key = ${param_idx}
             """
 
-            async with self.pool.acquire() as conn:
+            async with self._conn_manager.pool.acquire() as conn:
                 result = await conn.execute(sql, *params)
                 return result == "UPDATE 1"
 
         except Exception as e:
             raise PostgresBackendError(f"Failed to update memory: {e}") from e
+
+    async def delete(
+        self,
+        namespace: tuple[str, ...],
+        key: str,
+    ) -> bool:
+        """Delete a memory by key.
+
+        Args:
+            namespace: Hierarchical namespace tuple
+            key: Unique identifier within the namespace
+
+        Returns:
+            True if memory was deleted, False if not found
+
+        Raises:
+            PostgresBackendError: If delete operation fails
+        """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
+        memory_type = self._namespace_to_memory_type(namespace)
+        table_name = memory_type.table_name
+
+        try:
+            async with self._conn_manager.pool.acquire() as conn:
+                result = await conn.execute(
+                    f"DELETE FROM {table_name} WHERE key = $1",
+                    key,
+                )
+                return result == "DELETE 1"
+
+        except Exception as e:
+            raise PostgresBackendError(f"Failed to delete memory: {e}") from e
+
+    # =========================================================================
+    # Search Operations
+    # =========================================================================
+
+    async def search(
+        self,
+        namespace: tuple[str, ...],
+        query: str,
+        embedding: list[float] | None = None,
+        k: int = 10,
+        filters: dict | None = None,
+    ) -> list[dict]:
+        """Search memories using text query or embedding similarity.
+
+        For vector-enabled memory types:
+        - If embedding is provided, uses pgvector's <=> operator for cosine distance
+        - Falls back to text similarity using pg_trgm if no embedding
+
+        For SQL-only types:
+        - Uses LIKE-based text search on content
+
+        Args:
+            namespace: Hierarchical namespace tuple
+            query: Text query for search
+            embedding: Optional embedding vector for semantic similarity search
+            k: Maximum number of results to return (default: 10)
+            filters: Optional filters (e.g., {"thread_id": "t1", "source": "docs"})
+
+        Returns:
+            List of matching memory dictionaries, ordered by relevance
+
+        Raises:
+            PostgresBackendError: If search operation fails
+        """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
+        memory_type = self._namespace_to_memory_type(namespace)
+        table_name = memory_type.table_name
+
+        try:
+            # Build filter conditions
+            where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
+
+            # Vector search for vector-enabled types
+            if memory_type.uses_vector and embedding:
+                return await self._vector_search(
+                    table_name, memory_type, embedding, k, where_clauses, params
+                )
+
+            # Text-based search fallback
+            return await self._text_search(table_name, memory_type, query, k, where_clauses, params)
+
+        except Exception as e:
+            raise PostgresBackendError(f"Failed to search memories: {e}") from e
+
+    async def _vector_search(
+        self,
+        table_name: str,
+        memory_type: MemoryType,
+        embedding: list[float],
+        k: int,
+        where_clauses: list[str],
+        params: list[Any],
+    ) -> list[dict]:
+        """Perform vector similarity search using pgvector."""
+        # Embedding is the first parameter
+        params.insert(0, embedding)
+
+        # Adjust parameter indices in where clauses
+        adjusted_clauses = []
+        for clause in where_clauses:
+            adjusted = clause
+            for i in range(len(params), 0, -1):
+                adjusted = adjusted.replace(f"${i}", f"${i + 1}")
+            adjusted_clauses.append(adjusted)
+
+        query = f"""
+            SELECT *, (embedding <=> $1) AS distance
+            FROM {table_name}
+            WHERE embedding IS NOT NULL
+            {f"AND {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""}
+            ORDER BY distance
+            LIMIT {k}
+        """
+
+        async with self._conn_manager.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+            results = []
+            for row in rows:
+                result = self._row_to_dict(memory_type, row)
+                result["_score"] = 1 - float(row["distance"])  # Convert distance to similarity
+                result["_distance"] = float(row["distance"])
+                results.append(result)
+
+            return results
+
+    async def _text_search(
+        self,
+        table_name: str,
+        memory_type: MemoryType,
+        query: str,
+        k: int,
+        where_clauses: list[str],
+        params: list[Any],
+    ) -> list[dict]:
+        """Perform text-based search using LIKE or pg_trgm similarity."""
+        if query:
+            param_idx = len(params) + 1
+
+            if memory_type.uses_vector:
+                # Use pg_trgm similarity for vector-enabled tables
+                where_clauses.append(f"similarity(content, ${param_idx}) > 0.1")
+                params.append(query)
+                order_clause = f"ORDER BY similarity(content, ${param_idx}) DESC"
+            else:
+                # Use LIKE for SQL-only tables
+                where_clauses.append(f"content ILIKE ${param_idx}")
+                params.append(f"%{query}%")
+                order_clause = "ORDER BY created_at DESC"
+        else:
+            order_clause = "ORDER BY created_at DESC"
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        sql = f"""
+            SELECT * FROM {table_name}
+            {where_sql}
+            {order_clause}
+            LIMIT {k}
+        """
+
+        async with self._conn_manager.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+            return [self._row_to_dict(memory_type, row) for row in rows]
+
+    async def hybrid_search(
+        self,
+        namespace: tuple[str, ...],
+        query: str,
+        embedding: list[float],
+        k: int = 10,
+        filters: dict | None = None,
+        vector_weight: float = 0.7,
+    ) -> list[dict]:
+        """Perform hybrid search combining vector similarity and keyword matching.
+
+        Uses pgvector for semantic similarity and pg_trgm for keyword matching,
+        then combines scores with configurable weighting.
+
+        Args:
+            namespace: Hierarchical namespace tuple
+            query: Text query for keyword search
+            embedding: Embedding vector for semantic search
+            k: Maximum number of results (default: 10)
+            filters: Optional filters to apply
+            vector_weight: Weight for vector similarity (0-1), keyword = 1 - vector_weight
+
+        Returns:
+            List of matching memory dictionaries, ordered by combined score
+
+        Raises:
+            PostgresBackendError: If memory type doesn't support vector search
+        """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
+        memory_type = self._namespace_to_memory_type(namespace)
+
+        if not memory_type.uses_vector:
+            raise PostgresBackendError(
+                f"Memory type {memory_type.value} does not support hybrid search"
+            )
+
+        table_name = memory_type.table_name
+        keyword_weight = 1 - vector_weight
+
+        try:
+            # Build filter conditions
+            where_clauses, filter_params = self._build_filter_clauses(
+                memory_type, namespace, filters
+            )
+
+            # Parameters: $1 = embedding, $2 = keyword_query
+            params = [embedding, query] + filter_params
+
+            # Adjust filter parameter indices
+            adjusted_clauses = []
+            for clause in where_clauses:
+                adjusted = clause
+                for i in range(len(filter_params), 0, -1):
+                    adjusted = adjusted.replace(f"${i}", f"${i + 2}")
+                adjusted_clauses.append(adjusted)
+
+            filter_sql = f"AND {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""
+
+            sql = f"""
+                WITH scored AS (
+                    SELECT *,
+                        (1 - (embedding <=> $1)) AS vector_score,
+                        COALESCE(similarity(content, $2), 0) AS keyword_score
+                    FROM {table_name}
+                    WHERE embedding IS NOT NULL
+                    {filter_sql}
+                )
+                SELECT *,
+                    (vector_score * {vector_weight} + keyword_score * {keyword_weight}) AS combined_score
+                FROM scored
+                WHERE keyword_score > 0.1 OR vector_score > 0.5
+                ORDER BY combined_score DESC
+                LIMIT {k}
+            """
+
+            async with self._conn_manager.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+
+                results = []
+                for row in rows:
+                    result = self._row_to_dict(memory_type, row)
+                    result["_score"] = float(row["combined_score"])
+                    result["_vector_score"] = float(row["vector_score"])
+                    result["_keyword_score"] = float(row["keyword_score"])
+                    results.append(result)
+
+                return results
+
+        except Exception as e:
+            raise PostgresBackendError(f"Failed to perform hybrid search: {e}") from e
+
+    # =========================================================================
+    # List and Filter Operations
+    # =========================================================================
+
+    async def list(
+        self,
+        namespace: tuple[str, ...],
+        filters: dict | None = None,
+        order_by: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """List memories in a namespace with optional filtering.
+
+        Args:
+            namespace: Hierarchical namespace tuple
+            filters: Optional filters (e.g., {"thread_id": "t1"})
+            order_by: Field to order by (prefix with - for descending, e.g., "-created_at")
+            limit: Maximum number of results
+
+        Returns:
+            List of memory dictionaries
+
+        Raises:
+            PostgresBackendError: If list operation fails
+        """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
+        memory_type = self._namespace_to_memory_type(namespace)
+        table_name = memory_type.table_name
+
+        try:
+            where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
+            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+            # Build ORDER BY clause
+            if order_by:
+                descending = order_by.startswith("-")
+                field = order_by[1:] if descending else order_by
+                direction = "DESC" if descending else "ASC"
+                order_sql = f"ORDER BY {field} {direction}"
+            else:
+                order_sql = "ORDER BY created_at DESC"
+
+            # Build LIMIT clause
+            limit_sql = f"LIMIT {limit}" if limit else ""
+
+            sql = f"""
+                SELECT * FROM {table_name}
+                {where_sql}
+                {order_sql}
+                {limit_sql}
+            """
+
+            async with self._conn_manager.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+                return [self._row_to_dict(memory_type, row) for row in rows]
+
+        except Exception as e:
+            raise PostgresBackendError(f"Failed to list memories: {e}") from e
 
     def _build_filter_clauses(
         self,
@@ -1509,7 +926,7 @@ class PostgresBackend:
         where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        async with self.pool.acquire() as conn:
+        async with self._conn_manager.pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"SELECT COUNT(*) FROM {table_name} {where_sql}",
                 *params,
@@ -1533,6 +950,8 @@ class PostgresBackend:
         Raises:
             PostgresBackendError: If no filters provided or delete fails
         """
+        from memharness.backends.postgres.connection import PostgresBackendError
+
         if not filters:
             raise PostgresBackendError("Cannot delete without filters")
 
@@ -1542,7 +961,7 @@ class PostgresBackend:
         where_clauses, params = self._build_filter_clauses(memory_type, namespace, filters)
         where_sql = f"WHERE {' AND '.join(where_clauses)}"
 
-        async with self.pool.acquire() as conn:
+        async with self._conn_manager.pool.acquire() as conn:
             result = await conn.execute(
                 f"DELETE FROM {table_name} {where_sql}",
                 *params,
@@ -1565,33 +984,8 @@ class PostgresBackend:
         memory_type = self._namespace_to_memory_type(namespace)
         table_name = memory_type.table_name
 
-        async with self.pool.acquire() as conn:
+        async with self._conn_manager.pool.acquire() as conn:
             await conn.execute(f"TRUNCATE TABLE {table_name} CASCADE")
-
-    async def health_check(self) -> dict[str, Any]:
-        """Check backend health and return status information.
-
-        Returns:
-            Dictionary with health status and pool statistics
-        """
-        try:
-            async with self.pool.acquire() as conn:
-                await conn.fetchval("SELECT 1")
-
-            return {
-                "status": "healthy",
-                "backend": "postgres",
-                "pool_size": self._pool.get_size() if self._pool else 0,
-                "pool_min_size": self._min_pool_size,
-                "pool_max_size": self._max_pool_size,
-                "vector_dim": self._vector_dim,
-            }
-        except Exception as e:
-            return {
-                "status": "unhealthy",
-                "backend": "postgres",
-                "error": str(e),
-            }
 
     async def get_table_stats(self) -> dict[str, int]:
         """Get row counts for all memory tables.
@@ -1604,7 +998,7 @@ class PostgresBackend:
         for memory_type in MemoryType:
             table_name = memory_type.table_name
             try:
-                async with self.pool.acquire() as conn:
+                async with self._conn_manager.pool.acquire() as conn:
                     row = await conn.fetchrow(f"SELECT COUNT(*) FROM {table_name}")
                     stats[table_name] = row["count"]
             except Exception:
