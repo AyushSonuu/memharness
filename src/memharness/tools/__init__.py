@@ -32,15 +32,25 @@ Usage:
 """
 
 from memharness.tools.definitions import (
+    LANGCHAIN_AVAILABLE,
+    MemoryReadTool,
+    MemorySearchTool,
+    MemoryStatsTool,
+    MemoryWriteTool,
+    ToolboxGrepTool,
+    ToolboxTreeTool,
     get_memory_tools,
-    get_memory_tools_anthropic,
-    get_tool_names,
 )
 from memharness.tools.executor import MemoryToolExecutor
 
 __all__ = [
     "get_memory_tools",
-    "get_memory_tools_anthropic",
-    "get_tool_names",
     "MemoryToolExecutor",
+    "MemorySearchTool",
+    "MemoryReadTool",
+    "MemoryWriteTool",
+    "MemoryStatsTool",
+    "ToolboxTreeTool",
+    "ToolboxGrepTool",
+    "LANGCHAIN_AVAILABLE",
 ]

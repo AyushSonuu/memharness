@@ -144,29 +144,32 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         thread_id = config["configurable"]["thread_id"]
         checkpoint_id = config["configurable"].get("checkpoint_id")
 
-        # Build the workflow ID for lookup
-        workflow_id = self._build_workflow_id(thread_id, checkpoint_id)
+        # Search for checkpoints with this thread_id
+        query = f"langgraph checkpoint thread {thread_id}"
+        memories = await self.harness.search(query=query, memory_type="workflow", k=50)
 
-        # Try to get the checkpoint from workflow memory
-        memories = await self.harness.get_workflow(workflow_id)
+        # Filter to only checkpoints for this thread
+        checkpoint_memories = [
+            m
+            for m in memories
+            if m.metadata.get("langgraph_thread_id") == thread_id
+            and m.metadata.get("type") == "checkpoint"
+        ]
 
-        if not memories:
+        if not checkpoint_memories:
             return None
 
-        # Get the most recent checkpoint (or specific one if checkpoint_id provided)
+        # Get the specific checkpoint or the most recent one
         checkpoint_data = None
-        for mem in memories:
-            if checkpoint_id:
+        if checkpoint_id:
+            for mem in checkpoint_memories:
                 if mem.metadata.get("checkpoint_id") == checkpoint_id:
                     checkpoint_data = mem
                     break
-            else:
-                # Get the latest
-                if checkpoint_data is None or (
-                    mem.metadata.get("timestamp", "")
-                    > checkpoint_data.metadata.get("timestamp", "")
-                ):
-                    checkpoint_data = mem
+        else:
+            # Get the most recent
+            checkpoint_memories.sort(key=lambda m: m.metadata.get("timestamp", ""), reverse=True)
+            checkpoint_data = checkpoint_memories[0]
 
         if checkpoint_data is None:
             return None
@@ -256,30 +259,34 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             return
 
         thread_id = config["configurable"]["thread_id"]
-        workflow_id = self._build_workflow_id(thread_id)
 
-        # Get all checkpoints for this thread
-        memories = await self.harness.get_workflow(workflow_id)
+        # Search for checkpoints with this thread_id
+        query = f"langgraph checkpoint thread {thread_id}"
+        memories = await self.harness.search(query=query, memory_type="workflow", k=100)
+
+        # Filter to only checkpoints for this thread
+        checkpoint_memories = [
+            m
+            for m in memories
+            if m.metadata.get("langgraph_thread_id") == thread_id
+            and m.metadata.get("type") == "checkpoint"
+        ]
 
         # Sort by timestamp descending
-        memories = sorted(
-            memories,
-            key=lambda m: m.metadata.get("timestamp", ""),
-            reverse=True,
-        )
+        checkpoint_memories.sort(key=lambda m: m.metadata.get("timestamp", ""), reverse=True)
 
         # Apply before filter
         before_ts = None
         if before:
             before_id = before["configurable"].get("checkpoint_id")
             if before_id:
-                for mem in memories:
+                for mem in checkpoint_memories:
                     if mem.metadata.get("checkpoint_id") == before_id:
                         before_ts = mem.metadata.get("timestamp")
                         break
 
         count = 0
-        for mem in memories:
+        for mem in checkpoint_memories:
             # Apply before filter
             if before_ts and mem.metadata.get("timestamp", "") >= before_ts:
                 continue
@@ -374,27 +381,43 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         # Generate new checkpoint ID from the checkpoint itself
         checkpoint_id = checkpoint["id"]
 
-        # Build workflow ID
-        workflow_id = self._build_workflow_id(thread_id)
-
         # Serialize checkpoint and metadata
         checkpoint_str = self._serialize_checkpoint(checkpoint)
         metadata_str = self._serialize_metadata(metadata)
         timestamp = datetime.now(UTC).isoformat()
 
-        # Store in workflow memory
+        # Store as a workflow memory with special metadata
+        # The content is the serialized checkpoint
+        task_description = f"LangGraph checkpoint {checkpoint_id} for thread {thread_id}"
+
         await self.harness.add_workflow(
-            workflow_id=workflow_id,
-            step_name=f"checkpoint_{checkpoint_id}",
-            data=checkpoint_str,
-            metadata={
-                "checkpoint_id": checkpoint_id,
-                "parent_checkpoint_id": parent_checkpoint_id,
-                "checkpoint_metadata": metadata_str,
-                "timestamp": timestamp,
-                "channel_versions": json.dumps(new_versions),
-            },
+            task=task_description,
+            steps=[f"Checkpoint step {checkpoint_id}"],
+            outcome="Checkpoint stored",
+            result=checkpoint_str,
         )
+
+        # Get the ID of the just-created workflow memory
+        # We need to search for it and update its metadata
+        recent_memories = await self.harness.search(
+            query=task_description, memory_type="workflow", k=1
+        )
+
+        if recent_memories:
+            memory_id = recent_memories[0].id
+            # Update with checkpoint-specific metadata
+            await self.harness.update(
+                memory_id,
+                metadata={
+                    "type": "checkpoint",
+                    "langgraph_thread_id": thread_id,
+                    "checkpoint_id": checkpoint_id,
+                    "parent_checkpoint_id": parent_checkpoint_id,
+                    "checkpoint_metadata": metadata_str,
+                    "timestamp": timestamp,
+                    "channel_versions": json.dumps(new_versions),
+                },
+            )
 
         return {
             "configurable": {
@@ -436,7 +459,6 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         thread_id = config["configurable"]["thread_id"]
         checkpoint_id = config["configurable"].get("checkpoint_id", "")
 
-        workflow_id = self._build_workflow_id(thread_id)
         timestamp = datetime.now(UTC).isoformat()
 
         # Serialize writes
@@ -459,17 +481,33 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
                     }
                 )
 
+        # Store as workflow memory
+        task_description = f"LangGraph writes for checkpoint {checkpoint_id} task {task_id}"
+
         await self.harness.add_workflow(
-            workflow_id=workflow_id,
-            step_name=f"writes_{checkpoint_id}_{task_id}",
-            data=json.dumps(writes_data),
-            metadata={
-                "type": "writes",
-                "checkpoint_id": checkpoint_id,
-                "task_id": task_id,
-                "timestamp": timestamp,
-            },
+            task=task_description,
+            steps=[f"Write to channel {w['channel']}" for w in writes_data],
+            outcome="Writes stored",
+            result=json.dumps(writes_data),
         )
+
+        # Update metadata
+        recent_memories = await self.harness.search(
+            query=task_description, memory_type="workflow", k=1
+        )
+
+        if recent_memories:
+            memory_id = recent_memories[0].id
+            await self.harness.update(
+                memory_id,
+                metadata={
+                    "type": "writes",
+                    "langgraph_thread_id": thread_id,
+                    "checkpoint_id": checkpoint_id,
+                    "task_id": task_id,
+                    "timestamp": timestamp,
+                },
+            )
 
     def _build_workflow_id(self, thread_id: str, checkpoint_id: str | None = None) -> str:
         """
@@ -496,7 +534,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             Serialized checkpoint string.
         """
         if self.serde:
-            return self.serde.dumps(checkpoint)
+            return (
+                self.serde.dumps_typed(checkpoint)[0]
+                if hasattr(self.serde, "dumps_typed")
+                else json.dumps(checkpoint, default=str)
+            )
         return json.dumps(checkpoint, default=str)
 
     def _deserialize_checkpoint(self, data: str) -> Checkpoint:
@@ -510,7 +552,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             The checkpoint data.
         """
         if self.serde:
-            return self.serde.loads(data)
+            return (
+                self.serde.loads_typed((data, "json"))
+                if hasattr(self.serde, "loads_typed")
+                else json.loads(data)
+            )
         return json.loads(data)
 
     def _serialize_metadata(self, metadata: CheckpointMetadata) -> str:

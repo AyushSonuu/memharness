@@ -12,7 +12,6 @@ memory tools called by AI agents, returning nicely formatted string results.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -211,23 +210,46 @@ class MemoryToolExecutor:
         Returns:
             Confirmation with memory ID.
         """
-        # Map memory types to their write methods
-        write_methods = {
-            "knowledge_base": self.memory.add_knowledge_base,
-            "entity": self.memory.add_entity,
-            "workflow": self.memory.add_workflow,
-            "skills": self.memory.add_skills,
-        }
-
-        if memory_type not in write_methods:
-            valid_types = ", ".join(sorted(write_methods.keys()))
-            return f"Error: Invalid memory type '{memory_type}'. Valid types: {valid_types}"
-
-        # Write the memory
-        memory_id = await write_methods[memory_type](
-            content=content,
-            metadata=metadata or {},
-        )
+        # Handle different memory types with their specific APIs
+        try:
+            if memory_type == "knowledge_base":
+                memory_id = await self.memory.add_knowledge(
+                    content=content,
+                    metadata=metadata or {},
+                )
+            elif memory_type == "entity":
+                # For entity, we need name, type, and description
+                # Parse from content or use defaults
+                entity_name = metadata.get("name", "Entity") if metadata else "Entity"
+                entity_type = metadata.get("type", "unknown") if metadata else "unknown"
+                memory_id = await self.memory.add_entity(
+                    name=entity_name,
+                    entity_type=entity_type,
+                    description=content,
+                )
+            elif memory_type == "workflow":
+                # For workflow, we need task, steps, outcome
+                task = metadata.get("task", "Workflow task") if metadata else "Workflow task"
+                steps = metadata.get("steps", ["Step 1"]) if metadata else ["Step 1"]
+                outcome = metadata.get("outcome", "Outcome") if metadata else "Outcome"
+                memory_id = await self.memory.add_workflow(
+                    task=task,
+                    steps=steps,
+                    outcome=outcome,
+                    result=content,
+                )
+            elif memory_type == "skills":
+                # For skills, we need skill name and description
+                skill_name = metadata.get("name", "Skill") if metadata else "Skill"
+                memory_id = await self.memory.add_skill(
+                    skill_name=skill_name,
+                    description=content,
+                )
+            else:
+                valid_types = "knowledge_base, entity, workflow, skills"
+                return f"Error: Invalid memory type '{memory_type}'. Valid types: {valid_types}"
+        except Exception as e:
+            return f"Error writing memory: {e}"
 
         lines = [
             "Memory written successfully!",
@@ -249,7 +271,7 @@ class MemoryToolExecutor:
         Returns:
             Formatted statistics overview.
         """
-        stats = await self.memory.stats()
+        stats = await self.memory.get_stats()
 
         lines = [
             "Memory Statistics",
@@ -367,31 +389,22 @@ class MemoryToolExecutor:
         """
         depth = max(1, min(5, depth))
 
-        tools = await self.memory.get_toolbox()
-
-        if not tools:
+        # Use the harness's toolbox_tree method directly
+        try:
+            tree_str = await self.memory.toolbox_tree(path=path)
+            return (
+                tree_str
+                if tree_str
+                else self._format_empty_results(
+                    "toolbox_tree",
+                    f"No tools found at path: '{path}'",
+                )
+            )
+        except Exception as e:
             return self._format_empty_results(
                 "toolbox_tree",
-                "No tools found in toolbox",
+                f"Error retrieving toolbox tree: {e}",
             )
-
-        # Build tree structure
-        tree = self._build_tool_tree(tools, path)
-
-        if not tree:
-            return self._format_empty_results(
-                "toolbox_tree",
-                f"No tools found at path: '{path}'",
-            )
-
-        lines = [
-            f"Toolbox Tree (from: {path})",
-            "",
-        ]
-
-        lines.extend(self._render_tree(tree, depth=depth))
-
-        return "\n".join(lines)
 
     async def _toolbox_ls(
         self,
@@ -408,38 +421,22 @@ class MemoryToolExecutor:
         Returns:
             Tool listing.
         """
-        tools = await self.memory.get_toolbox()
+        if not server:
+            return self._format_empty_results("toolbox_ls", "Server parameter is required")
 
-        if server:
-            tools = [t for t in tools if t.get("server") == server]
+        try:
+            tools = await self.memory.toolbox_ls(server=server)
+            if not tools:
+                return self._format_empty_results(
+                    "toolbox_ls", f"No tools found in server '{server}'"
+                )
 
-        if not tools:
-            msg = "No tools found"
-            if server:
-                msg += f" in server '{server}'"
-            return self._format_empty_results("toolbox_ls", msg)
-
-        # Group by server
-        by_server: dict[str, list[dict]] = {}
-        for tool in tools:
-            srv = tool.get("server", "unknown")
-            by_server.setdefault(srv, []).append(tool)
-
-        lines = []
-        for srv, srv_tools in sorted(by_server.items()):
-            lines.append(f"[{srv}] ({len(srv_tools)} tools)")
-
-            for tool in sorted(srv_tools, key=lambda t: t.get("name", "")):
-                name = tool.get("name", "unnamed")
-                if verbose:
-                    desc = self._truncate(tool.get("description", ""), 60)
-                    lines.append(f"  {name}: {desc}")
-                else:
-                    lines.append(f"  {name}")
-
-            lines.append("")
-
-        return "\n".join(lines)
+            lines = [f"[{server}] ({len(tools)} tools)"]
+            for tool in tools:
+                lines.append(f"  {tool}")
+            return "\n".join(lines)
+        except Exception as e:
+            return self._format_empty_results("toolbox_ls", f"Error listing tools: {e}")
 
     async def _toolbox_grep(
         self,
@@ -457,41 +454,30 @@ class MemoryToolExecutor:
             Matching tools.
         """
         try:
-            flags = 0 if case_sensitive else re.IGNORECASE
-            regex = re.compile(pattern, flags)
-        except re.error as e:
-            return f"Error: Invalid regex pattern: {e}"
+            matches = await self.memory.toolbox_grep(pattern=pattern)
 
-        tools = await self.memory.get_toolbox()
-        matches = []
+            if not matches:
+                return self._format_empty_results(
+                    "toolbox_grep",
+                    f"No tools matching pattern: '{pattern}'",
+                )
 
-        for tool in tools:
-            name = tool.get("name", "")
-            desc = tool.get("description", "")
+            lines = [
+                f"Found {len(matches)} tools matching '{pattern}':",
+                "",
+            ]
 
-            if regex.search(name) or regex.search(desc):
-                matches.append(tool)
+            for tool in matches:
+                tool_name = tool.get("name", "unnamed")
+                server = tool.get("server", "unknown")
+                desc = self._truncate(tool.get("description", ""), 60)
+                lines.append(f"  [{server}] {tool_name}")
+                lines.append(f"    {desc}")
+                lines.append("")
 
-        if not matches:
-            return self._format_empty_results(
-                "toolbox_grep",
-                f"No tools matching pattern: '{pattern}'",
-            )
-
-        lines = [
-            f"Found {len(matches)} tools matching '{pattern}':",
-            "",
-        ]
-
-        for tool in sorted(matches, key=lambda t: t.get("name", "")):
-            name = tool.get("name", "unnamed")
-            server = tool.get("server", "unknown")
-            desc = self._truncate(tool.get("description", ""), 60)
-            lines.append(f"  [{server}] {name}")
-            lines.append(f"    {desc}")
-            lines.append("")
-
-        return "\n".join(lines)
+            return "\n".join(lines)
+        except Exception as e:
+            return self._format_empty_results("toolbox_grep", f"Error searching tools: {e}")
 
     async def _toolbox_cat(
         self,
@@ -508,65 +494,46 @@ class MemoryToolExecutor:
         Returns:
             Full tool documentation.
         """
-        tools = await self.memory.get_toolbox()
-
-        # Find matching tools
-        matches = [t for t in tools if t.get("name") == tool_name]
-
+        # Build the tool path
         if server:
-            matches = [t for t in matches if t.get("server") == server]
+            tool_path = f"{server}/{tool_name}"
+        else:
+            tool_path = tool_name
 
-        if not matches:
-            return self._format_empty_results(
-                "toolbox_cat",
-                f"Tool not found: '{tool_name}'" + (f" in server '{server}'" if server else ""),
-            )
+        try:
+            tool = await self.memory.toolbox_cat(tool_path=tool_path)
 
-        if len(matches) > 1:
-            servers = [t.get("server", "unknown") for t in matches]
+            if not tool:
+                return self._format_empty_results(
+                    "toolbox_cat",
+                    f"Tool not found: '{tool_path}'",
+                )
+
             lines = [
-                f"Multiple tools named '{tool_name}' found.",
-                f"Please specify server: {', '.join(servers)}",
+                f"Tool: {tool.get('name', 'unnamed')}",
+                "=" * 50,
+                f"Server: {tool.get('server', 'unknown')}",
+                "",
+                "Description:",
+                "-" * 30,
+                tool.get("description", "No description available"),
+                "",
             ]
+
+            # Parameters
+            params = tool.get("parameters", tool.get("input_schema", {}))
+            if params:
+                lines.extend(
+                    [
+                        "Parameters:",
+                        "-" * 30,
+                        self._format_tool_params(params),
+                    ]
+                )
+
             return "\n".join(lines)
-
-        tool = matches[0]
-
-        lines = [
-            f"Tool: {tool.get('name', 'unnamed')}",
-            "=" * 50,
-            f"Server: {tool.get('server', 'unknown')}",
-            "",
-            "Description:",
-            "-" * 30,
-            tool.get("description", "No description available"),
-            "",
-        ]
-
-        # Parameters
-        params = tool.get("parameters", tool.get("input_schema", {}))
-        if params:
-            lines.extend(
-                [
-                    "Parameters:",
-                    "-" * 30,
-                    self._format_tool_params(params),
-                ]
-            )
-
-        # Examples if available
-        if "examples" in tool:
-            lines.extend(
-                [
-                    "",
-                    "Examples:",
-                    "-" * 30,
-                ]
-            )
-            for example in tool["examples"]:
-                lines.append(f"  {json.dumps(example, indent=2)}")
-
-        return "\n".join(lines)
+        except Exception as e:
+            return self._format_empty_results("toolbox_cat", f"Error retrieving tool: {e}")
 
     # =========================================================================
     # Summary Tools
@@ -632,19 +599,28 @@ class MemoryToolExecutor:
         """Format a 'no results' message."""
         return f"[{tool}] {message}"
 
-    def _format_memory_result(self, index: int, result: dict) -> list[str]:
+    def _format_memory_result(self, index: int, result: Any) -> list[str]:
         """Format a single memory search result."""
-        memory_id = result.get("id", "unknown")
-        memory_type = result.get("memory_type", "unknown")
-        content = result.get("content", "")
-        score = result.get("score", 0.0)
+        # Result is a MemoryUnit object (dataclass)
+        memory_id = result.id
+        memory_type = (
+            result.memory_type.value
+            if hasattr(result.memory_type, "value")
+            else str(result.memory_type)
+        )
+        content = result.content
+
+        # If the result has a score (from search), show it
+        score = getattr(result, "score", None)
 
         preview = self._truncate(content, 150)
 
-        return [
-            f"{index}. [{memory_type}] ID: {memory_id} (relevance: {score:.2f})",
-            f"   {preview}",
-        ]
+        result_lines = [f"{index}. [{memory_type}] ID: {memory_id}"]
+        if score is not None:
+            result_lines[0] += f" (relevance: {score:.2f})"
+        result_lines.append(f"   {preview}")
+
+        return result_lines
 
     def _format_datetime(self, dt: datetime | str | None) -> str:
         """Format a datetime for display."""
