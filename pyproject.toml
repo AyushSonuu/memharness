@@ -52,7 +52,7 @@ anthropic = [
     "anthropic>=0.86.0",
 ]
 langchain = [
-    "langchain>=1.2.13",
+    "langchain>=1.2.0",
     "langchain-core>=0.3.0",
 ]
 all = [
@@ -62,7 +62,7 @@ all = [
     "sentence-transformers>=5.3.0",
     "openai>=2.29.0",
     "anthropic>=0.86.0",
-    "langchain>=1.2.13",
+    "langchain>=1.2.0",
     "langchain-core>=0.3.0",
 ]
 dev = [
