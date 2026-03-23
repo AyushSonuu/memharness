@@ -213,25 +213,6 @@ Configurable:
 - `max_tokens=4000` — context budget (default 4000, estimated as chars/4)
 - `summarize_threshold=0.8` — trigger summarization at 80%
 
-## LangGraph Workflow (Alternative)
-
-For more control, use the built-in LangGraph workflow instead of middleware:
-
-```python
-from memharness.agents.agent_workflow import create_memory_agent
-
-graph = create_memory_agent(harness, llm="anthropic:claude-sonnet-4-6")
-
-result = await graph.ainvoke({
-    "messages": [],
-    "thread_id": "user-1",
-    "query": "How do I deploy?",
-})
-print(result["final_answer"])
-```
-
-This runs the same BEFORE → INSIDE → AFTER flow as the middleware but as a LangGraph graph with 8 nodes.
-
 ## Advanced: Granular Middleware
 
 If you want fine-grained control, split into separate middleware:
