@@ -52,26 +52,11 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Middleware',
-      items: [
-        'middleware/overview',
-      ],
-    },
-    {
-      type: 'category',
       label: 'Memory Tools',
       items: [
         'tools/overview',
         'tools/self-exploration',
         'tools/toolbox-vfs',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Integrations',
-      items: [
-        'integrations/langchain',
-        'integrations/langgraph',
       ],
     },
     {
