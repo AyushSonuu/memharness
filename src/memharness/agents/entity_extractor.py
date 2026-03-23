@@ -164,7 +164,9 @@ class EntityExtractorAgent:
 
         return {"entities": entities, "total_extracted": total}
 
-    async def extract_from_recent(self, since: datetime | None = None) -> dict[str, Any]:
+    async def extract_from_recent(
+        self, since: datetime | None = None, limit: int = 100
+    ) -> dict[str, Any]:
         """
         Extract entities from recent conversation messages.
 
@@ -178,6 +180,7 @@ class EntityExtractorAgent:
         Args:
             since: Optional timestamp - only process messages after this time.
                   If None, processes all messages.
+            limit: Maximum number of messages to process (default: 100).
 
         Returns:
             Dictionary with 'extracted' count and 'entities' list.
@@ -189,46 +192,71 @@ class EntityExtractorAgent:
             print(f"Extracted {result['extracted']} entities")
             ```
         """
-
         extracted_count = 0
         all_entities: list[dict[str, str]] = []
 
-        # Get all conversational memories
-        # Note: This is a simplified implementation. In production, you'd want to:
-        # 1. Filter by timestamp (since parameter)
-        # 2. Batch process large numbers of messages
-        # 3. Track which messages have already been processed
         try:
-            # For now, we'll scan a limited set of recent messages
-            # In a full implementation, you'd query the backend with timestamp filters
-            # Example: messages = await self.harness.backend.search_by_timestamp(
-            #              memory_type=MemoryType.CONVERSATIONAL, since=since, limit=100
-            #          )
+            # Get recent conversational messages
+            # Since we don't have a direct timestamp filter, we'll get recent messages
+            # and filter them manually if needed
+            from memharness.types import MemoryType
 
-            # Placeholder: extract entities and upsert them
-            # The actual implementation would iterate over messages and:
-            # 1. Extract entities from each message
-            # 2. For each entity, check if it exists (by name)
-            # 3. If exists: update (refresh updated_at)
-            # 4. If not exists: insert
-            #
-            # Example pseudo-code:
-            # for message in messages:
-            #     entities = await self.extract_entities(message.content)
-            #     for category, names in entities.items():
-            #         for name in names:
-            #             existing = await self.harness.search_entity(name, k=1)
-            #             if existing and existing[0].metadata.get('entity_name') == name:
-            #                 # Update existing entity (refresh timestamp)
-            #                 await self.harness.update_entity(existing[0].id, content=...)
-            #             else:
-            #                 # Insert new entity
-            #                 await self.harness.add_entity(
-            #                     name, category, f"{category}: {name}"
-            #                 )
-            #             extracted_count += 1
+            # Use search_all to get all conversational memories
+            # (In production, you'd add timestamp filtering at backend level)
+            messages = await self.harness.search("", memory_type=MemoryType.CONVERSATIONAL, k=limit)
 
-            pass
+            # Filter by timestamp if provided
+            if since:
+                messages = [
+                    m for m in messages if m.metadata.get("created_at", datetime.min) > since
+                ]
+
+            # Process each message
+            for message in messages:
+                # Skip messages that have already been processed for entities
+                if message.metadata.get("entities_extracted"):
+                    continue
+
+                # Extract entities from message content
+                entities = await self.extract_entities(message.content)
+
+                # Process each entity type
+                for category, names in entities.items():
+                    for name in names:
+                        if not name.strip():
+                            continue
+
+                        # Search for existing entity by name
+                        existing = await self.harness.search_entity(name, k=1)
+
+                        entity_id = None
+                        if existing and existing[0].metadata.get("entity_name") == name:
+                            # Update existing entity (refresh timestamp)
+                            entity_id = existing[0].id
+                            await self.harness.update(
+                                entity_id,
+                                content=f"{category}: {name}",
+                                metadata={
+                                    **existing[0].metadata,
+                                    "entity_type": category,
+                                    "updated_at": datetime.utcnow().isoformat(),
+                                },
+                            )
+                        else:
+                            # Insert new entity
+                            entity_id = await self.harness.add_entity(
+                                name=name, entity_type=category, content=f"{category}: {name}"
+                            )
+
+                        extracted_count += 1
+                        all_entities.append({"id": entity_id, "name": name, "type": category})
+
+                # Mark message as processed
+                await self.harness.update(
+                    message.id,
+                    metadata={**message.metadata, "entities_extracted": True},
+                )
+
         except Exception as e:
             import logging
 
