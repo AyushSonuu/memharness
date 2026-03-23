@@ -70,3 +70,5 @@ Thumbs.db
 docs/node_modules/
 docs/.docusaurus/
 docs/build/
+dist/
+dist/
