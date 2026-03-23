@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import CodeBlock from '@theme/CodeBlock';
 
 import styles from './index.module.css';
 
@@ -42,13 +43,13 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: '10 Memory Types',
+    title: '8 Memory Types',
     emoji: '📦',
     description: (
       <>
         Conversational, Knowledge Base, Entity, Workflow, Toolbox, Summary,
-        Tool Log, Skills, File, and Persona — each with its own schema,
-        storage strategy, and retrieval pattern.
+        Tool Log, and Persona — each with its own schema, storage strategy,
+        and retrieval pattern.
       </>
     ),
   },
@@ -58,8 +59,7 @@ const FeatureList: FeatureItem[] = [
     description: (
       <>
         Works with LangChain, LangGraph, CrewAI, Deep Agents, or your custom
-        agent framework. One memory layer, any agent. Includes built-in
-        LangChain and LangGraph adapters.
+        agent framework. One memory layer, any agent.
       </>
     ),
   },
@@ -69,17 +69,17 @@ const FeatureList: FeatureItem[] = [
     description: (
       <>
         PostgreSQL + pgvector for production, SQLite for development, in-memory
-        for testing. Same API across all backends. Swap with one line of config.
+        for testing. Same API across all backends.
       </>
     ),
   },
   {
-    title: 'Async-First API',
-    emoji: '⚡',
+    title: '12 Agent Tools',
+    emoji: '🔍',
     description: (
       <>
-        Built for modern Python. Full async/await support throughout. Context
-        managers, type hints, and Pydantic models for configuration.
+        Complete self-awareness toolkit: search, read, write, expand summaries,
+        log tool calls, save workflows, assemble context, explore toolbox VFS.
       </>
     ),
   },
@@ -88,20 +88,18 @@ const FeatureList: FeatureItem[] = [
     emoji: '♻️',
     description: (
       <>
-        Built-in agents for summarization, consolidation, garbage collection,
-        and entity extraction. Configurable policies keep your memory clean
-        and relevant.
+        Built-in agents for summarization, consolidation, entity extraction,
+        and garbage collection. Configurable policies keep memory clean.
       </>
     ),
   },
   {
-    title: 'Self-Exploration Tools',
-    emoji: '🔍',
+    title: 'Async-First API',
+    emoji: '⚡',
     description: (
       <>
-        Agents can explore their own memory with built-in LangChain tools.
-        VFS-based tool discovery with tree, ls, grep, and cat operations
-        for the Toolbox memory type.
+        Full async/await support. Context managers, type hints, Pydantic
+        config models. Python 3.13+.
       </>
     ),
   },
@@ -121,92 +119,83 @@ function Feature({title, emoji, description}: FeatureItem) {
   );
 }
 
+const agentExample = `from memharness import MemoryHarness
+from memharness.tools import get_memory_tools
+from langchain.agents import create_agent
+
+# 1. Create memory harness (SQLite for dev, PostgreSQL for prod)
+harness = MemoryHarness("sqlite:///agent_memory.db")
+await harness.connect()
+
+# 2. Get all 12 memory tools for agent self-awareness
+memory_tools = get_memory_tools(harness)
+
+# 3. Create a memory-aware agent
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",  # any LLM via init_chat_model
+    tools=memory_tools + your_other_tools,
+    system_prompt="""You are a helpful assistant with persistent memory.
+Use your memory tools to remember important information.
+Before answering, search your memory for relevant context.""",
+)
+
+# 4. Agent can now search, read, write, expand, summarize, log...
+result = await agent.ainvoke({
+    "messages": [{"role": "user", "content": "What did we discuss yesterday?"}]
+})`;
+
+const standaloneExample = `from memharness import MemoryHarness
+from memharness.agents import ContextAssemblyAgent
+
+async with MemoryHarness("sqlite:///memory.db") as harness:
+    # Store memories across types
+    await harness.add_conversational("thread-1", "user", "I prefer Python")
+    await harness.add_knowledge("Python 3.13 has free-threading", source="docs")
+    await harness.add_entity("Alice", "PERSON", "Engineer at Acme Corp")
+    await harness.add_workflow(
+        task="Deploy app",
+        steps=["Build", "Test", "Docker push", "K8s apply"],
+        outcome="Deployed successfully",
+    )
+
+    # Assemble context (BEFORE-loop pattern from agent memory course)
+    ctx_agent = ContextAssemblyAgent(harness)
+    ctx = await ctx_agent.assemble("Tell me about Python", thread_id="thread-1")
+
+    # Get as LangChain messages (SystemMessage + HumanMessage + AIMessage)
+    messages = ctx.to_messages()  # list[BaseMessage]
+
+    # Or as markdown prompt string
+    prompt = ctx.to_prompt()  # str with ## sections`;
+
 function QuickStart() {
   return (
     <section style={{padding: '2rem 0', backgroundColor: 'var(--ifm-background-surface-color)'}}>
       <div className="container">
         <div className="row">
-          <div className="col col--8 col--offset-2">
+          <div className="col col--10 col--offset-1">
             <Heading as="h2" className="text--center" style={{marginBottom: '0.5rem'}}>
-              Use with LangChain Agent
+              🤖 Use with LangChain Agent
             </Heading>
-            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1.5rem'}}>
-              Give any agent persistent, searchable memory in 10 lines
+            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1rem'}}>
+              Give any agent persistent, searchable memory with 12 self-awareness tools
             </p>
-            <pre style={{
-              padding: '1.5rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              lineHeight: '1.6',
-            }}>
-              <code>{`from memharness import MemoryHarness
-from memharness.tools import get_memory_tools
-from langchain.agents import create_agent
-
-# 1. Create memory harness
-harness = MemoryHarness("sqlite:///agent_memory.db")
-await harness.connect()
-
-# 2. Get 12 memory tools (search, read, write, expand, summarize, etc.)
-memory_tools = get_memory_tools(harness)
-
-# 3. Create a memory-aware agent
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-6",  # or any LLM
-    tools=memory_tools + your_other_tools,
-    system_prompt="""You are a helpful assistant with persistent memory.
-Use your memory tools to remember important information across conversations.
-Before answering, search your memory for relevant context.""",
-)
-
-# 4. The agent can now:
-#    - Search past conversations, knowledge, entities, workflows
-#    - Write important facts to knowledge base
-#    - Log tool executions for audit trail
-#    - Save successful task patterns as reusable workflows
-#    - Expand compacted summaries for full detail
-#    - Assemble complete context from all memory types
-result = await agent.ainvoke({
-    "messages": [{"role": "user", "content": "What did we discuss yesterday?"}]
-})`}</code>
-            </pre>
+            <CodeBlock language="python" title="langchain_agent.py" showLineNumbers>
+              {agentExample}
+            </CodeBlock>
           </div>
         </div>
-      </div>
-      <div className="container" style={{paddingTop: '2rem'}}>
-        <div className="row">
-          <div className="col col--8 col--offset-2">
+        <div className="row" style={{marginTop: '2rem'}}>
+          <div className="col col--10 col--offset-1">
             <Heading as="h2" className="text--center" style={{marginBottom: '0.5rem'}}>
-              Or Use Standalone
+              🧠 Or Use Standalone
             </Heading>
-            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1.5rem'}}>
+            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1rem'}}>
               No framework needed — memharness works with any Python code
             </p>
-            <pre style={{
-              padding: '1.5rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              lineHeight: '1.6',
-            }}>
-              <code>{`from memharness import MemoryHarness
-from memharness.agents import ContextAssemblyAgent
-
-async with MemoryHarness("sqlite:///memory.db") as harness:
-    # Store memories
-    await harness.add_conversational("thread-1", "user", "I prefer Python over JS")
-    await harness.add_knowledge("Python 3.13 has free-threaded mode", source="docs")
-    await harness.add_entity("Alice", "PERSON", "Senior engineer at Acme Corp")
-
-    # Assemble context for any LLM (BEFORE-loop pattern)
-    ctx_agent = ContextAssemblyAgent(harness)
-    ctx = await ctx_agent.assemble("Tell me about Python", thread_id="thread-1")
-
-    # Get as LangChain messages (HumanMessage, AIMessage, SystemMessage)
-    messages = ctx.to_messages()
-
-    # Or as markdown prompt string
-    prompt = ctx.to_prompt()`}</code>
-            </pre>
+            <CodeBlock language="python" title="standalone.py" showLineNumbers>
+              {standaloneExample}
+            </CodeBlock>
           </div>
         </div>
       </div>
@@ -218,7 +207,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="Memory Infrastructure for AI Agents"
-      description="Framework-agnostic memory infrastructure for AI agents. 10 memory types, pluggable backends, async-first API.">
+      description="Framework-agnostic memory infrastructure for AI agents. 8 memory types, pluggable backends, 12 self-awareness tools.">
       <HomepageHeader />
       <main>
         <section className={styles.features}>
