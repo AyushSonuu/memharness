@@ -6,7 +6,6 @@
 Memory agents for intelligent memory management.
 
 This module provides AI agents that perform automatic maintenance,
-summarization, entity extraction, consolidation, and garbage collection.
 
 All agents work WITHOUT an LLM (using deterministic fallbacks) but can
 leverage LLMs when provided for more intelligent operations.
@@ -16,7 +15,6 @@ from memharness.agents.base import BaseMemoryAgent
 from memharness.agents.consolidator import ConsolidatorAgent
 from memharness.agents.context_assembler import AssembledContext, ContextAssemblyAgent
 from memharness.agents.entity_extractor import EntityExtractorAgent
-from memharness.agents.gc import GCAgent
 from memharness.agents.summarizer import SummarizerAgent
 
 __all__ = [
@@ -24,7 +22,6 @@ __all__ = [
     "SummarizerAgent",
     "EntityExtractorAgent",
     "ConsolidatorAgent",
-    "GCAgent",
     "AssembledContext",
     "ContextAssemblyAgent",
 ]

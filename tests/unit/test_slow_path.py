@@ -87,32 +87,19 @@ class TestSlowPath:
         assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
-    async def test_garbage_collect(self, slow_path):
-        """Test garbage collection worker."""
-        result = await slow_path.garbage_collect()
-
-        # Should return a WorkerResult
-        assert isinstance(result, WorkerResult)
-        assert result.worker == "gc"
-        assert result.processed >= 0
-        assert result.errors >= 0
-        assert result.duration_ms >= 0
-
-    @pytest.mark.asyncio
     async def test_run_all(self, slow_path):
         """Test running all workers."""
         results = await slow_path.run_all()
 
         # Should return list of 4 results
         assert isinstance(results, list)
-        assert len(results) == 4
+        assert len(results) == 3
 
         # Check worker names
         worker_names = [r.worker for r in results]
         assert "entity_extractor" in worker_names
         assert "summarizer" in worker_names
         assert "consolidator" in worker_names
-        assert "gc" in worker_names
 
         # All should have valid metrics
         for result in results:
@@ -156,7 +143,7 @@ class TestSlowPath:
 
         # Should be able to run
         results = await slow_path.run_all()
-        assert len(results) == 4
+        assert len(results) == 3
 
     @pytest.mark.asyncio
     async def test_extract_entities_with_conversations(self, slow_path, harness):
@@ -181,7 +168,7 @@ class TestSlowPath:
         results = await slow_path.run_all()
 
         # All workers should complete (even if with errors)
-        assert len(results) == 4
+        assert len(results) == 3
 
         # Workers should track errors
         for result in results:
@@ -192,11 +179,11 @@ class TestSlowPath:
         """Test that slow path can be run multiple times safely."""
         # Run once
         results1 = await slow_path.run_all()
-        assert len(results1) == 4
+        assert len(results1) == 3
 
         # Run again
         results2 = await slow_path.run_all()
-        assert len(results2) == 4
+        assert len(results2) == 3
 
         # Should not error
         for result in results2:

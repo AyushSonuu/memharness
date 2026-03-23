@@ -105,13 +105,11 @@ class SlowPath:
         # Import agents
         from memharness.agents.consolidator import ConsolidatorAgent
         from memharness.agents.entity_extractor import EntityExtractorAgent
-        from memharness.agents.gc import GCAgent
         from memharness.agents.summarizer import SummarizerAgent
 
         self._entity_extractor = EntityExtractorAgent(harness, llm=entity_extractor_llm)
         self._summarizer = SummarizerAgent(harness, llm=summarizer_llm)
         self._consolidator = ConsolidatorAgent(harness)
-        self._gc = GCAgent(harness)
         self._last_processed_at: datetime | None = None
 
     async def run_all(self) -> list[WorkerResult]:
@@ -138,7 +136,6 @@ class SlowPath:
         results.append(await self.extract_entities())
         results.append(await self.summarize_threads())
         results.append(await self.consolidate())
-        results.append(await self.garbage_collect())
         self._last_processed_at = datetime.now(UTC)
         return results
 
@@ -238,33 +235,3 @@ class SlowPath:
 
         elapsed = (datetime.now(UTC) - start).total_seconds() * 1000
         return WorkerResult("consolidator", processed, errors, elapsed)
-
-    async def garbage_collect(self) -> WorkerResult:
-        """Archive/delete old data.
-
-        This worker:
-        1. Archives memories older than the archive threshold
-        2. Deletes memories older than the deletion threshold
-        3. Respects retention policies (e.g., keep last N messages per thread)
-
-        Returns:
-            WorkerResult with GC statistics.
-
-        Example:
-            ```python
-            result = await slow.garbage_collect()
-            print(f'Archived {result.processed} old memories')
-            ```
-        """
-        start = datetime.now(UTC)
-        processed = 0
-        errors = 0
-        try:
-            result = await self._gc.run()
-            processed = result.get("archived", 0) + result.get("deleted", 0)
-        except Exception as e:
-            logger.error(f"Garbage collection failed: {e}", exc_info=True)
-            errors = 1
-
-        elapsed = (datetime.now(UTC) - start).total_seconds() * 1000
-        return WorkerResult("gc", processed, errors, elapsed)

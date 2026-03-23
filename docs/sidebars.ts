@@ -47,7 +47,6 @@ const sidebars: SidebarsConfig = {
         'agents/summarizer',
         'agents/entity-extractor',
         'agents/consolidator',
-        'agents/gc',
         'agents/context-assembler',
       ],
     },

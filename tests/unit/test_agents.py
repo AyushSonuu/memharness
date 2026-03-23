@@ -12,7 +12,6 @@ import pytest
 
 from memharness.agents.consolidator import ConsolidatorAgent
 from memharness.agents.entity_extractor import EntityExtractorAgent
-from memharness.agents.gc import GCAgent
 from memharness.agents.summarizer import SummarizerAgent
 from memharness.types import MemoryType, MemoryUnit
 
@@ -172,48 +171,3 @@ class TestConsolidatorAgent:
         assert "deleted" in result
         assert "threshold" in result
         assert result["threshold"] == 0.9
-
-
-class TestGCAgent:
-    """Tests for GCAgent."""
-
-    async def test_archive_old_memories(self, mock_harness):
-        """Test archiving old memories."""
-        agent = GCAgent(mock_harness, archive_after_days=90)
-
-        archived = await agent.archive_old_memories()
-
-        assert isinstance(archived, int)
-        assert archived >= 0
-
-    async def test_delete_old_memories(self, mock_harness):
-        """Test deleting old memories."""
-        agent = GCAgent(mock_harness, delete_after_days=365)
-
-        deleted = await agent.delete_old_memories()
-
-        assert isinstance(deleted, int)
-        assert deleted >= 0
-
-    async def test_run_method(self, mock_harness):
-        """Test the run method."""
-        agent = GCAgent(mock_harness, archive_after_days=60, delete_after_days=180)
-
-        result = await agent.run()
-
-        assert "archived" in result
-        assert "deleted" in result
-        assert "archive_after_days" in result
-        assert "delete_after_days" in result
-        assert result["archive_after_days"] == 60
-        assert result["delete_after_days"] == 180
-
-    async def test_llm_not_used(self, mock_harness):
-        """Test that GC agent works without LLM."""
-        mock_llm = MagicMock()
-        agent = GCAgent(mock_harness, llm=mock_llm)
-
-        await agent.run()
-
-        # LLM should not be called for GC agent
-        assert not mock_llm.called
