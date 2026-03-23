@@ -109,14 +109,4 @@ class ContextMixin:
                 sections.append(f"## Relevant Workflows\n{wf_text}")
                 estimated_tokens += len(wf_text) // chars_per_token
 
-        # 6. Relevant skills
-        if estimated_tokens < max_tokens:
-            skills = await self_mixin.search_skills(query, k=2)  # type: ignore[attr-defined]
-            if skills:
-                skills_text = "\n".join(
-                    f"- {s.metadata.get('name', 'Skill')}: {s.metadata.get('description', '')}"
-                    for s in skills
-                )
-                sections.append(f"## Available Skills\n{skills_text}")
-
         return "\n\n".join(sections)

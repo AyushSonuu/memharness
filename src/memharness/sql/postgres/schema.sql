@@ -1,5 +1,5 @@
 -- memharness PostgreSQL + pgvector schema
--- Full schema creation with vector support for all 10 memory types
+-- Full schema creation with vector support for all 9 memory types
 -- Copyright (c) 2026 Ayush Sonuu
 -- Licensed under MIT License
 
@@ -170,26 +170,6 @@ ON toolbox_memory USING GIN(namespace);
 
 CREATE INDEX IF NOT EXISTS idx_toolbox_key
 ON toolbox_memory(key);
-
--- =========================================================================
--- Skills Memory Table (Vector-based)
--- =========================================================================
--- CREATE TABLE IF NOT EXISTS skills_memory is defined via Python (vector_dim param)
-
-CREATE INDEX IF NOT EXISTS idx_skills_embedding
-ON skills_memory USING hnsw(embedding vector_cosine_ops);
-
-CREATE INDEX IF NOT EXISTS idx_skills_name
-ON skills_memory(skill_name);
-
-CREATE INDEX IF NOT EXISTS idx_skills_namespace
-ON skills_memory USING GIN(namespace);
-
-CREATE INDEX IF NOT EXISTS idx_skills_key
-ON skills_memory(key);
-
-CREATE INDEX IF NOT EXISTS idx_skills_content_trgm
-ON skills_memory USING GIN(content gin_trgm_ops);
 
 -- =========================================================================
 -- File Memory Table (Hybrid - Vector + metadata)

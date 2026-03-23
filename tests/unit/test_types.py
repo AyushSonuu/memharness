@@ -17,7 +17,7 @@ class TestMemoryType:
     """Tests for MemoryType enum."""
 
     def test_all_memory_types_exist(self):
-        """Verify all 10 memory types are defined."""
+        """Verify all 9 memory types are defined."""
         expected_types = [
             "CONVERSATIONAL",
             "KNOWLEDGE",
@@ -26,7 +26,6 @@ class TestMemoryType:
             "TOOLBOX",
             "SUMMARY",
             "TOOL_LOG",
-            "SKILLS",
             "FILE",
             "PERSONA",
         ]
@@ -43,13 +42,12 @@ class TestMemoryType:
         assert MemoryType.TOOLBOX.value == "toolbox"
         assert MemoryType.SUMMARY.value == "summary"
         assert MemoryType.TOOL_LOG.value == "tool_log"
-        assert MemoryType.SKILLS.value == "skills"
         assert MemoryType.FILE.value == "file"
         assert MemoryType.PERSONA.value == "persona"
 
     def test_memory_type_count(self):
-        """Ensure exactly 10 memory types exist."""
-        assert len(MemoryType) == 10
+        """Ensure exactly 9 memory types exist."""
+        assert len(MemoryType) == 9
 
     def test_memory_type_from_string(self):
         """Test creating MemoryType from string value."""
@@ -65,7 +63,7 @@ class TestMemoryType:
     def test_memory_type_iteration(self):
         """Test iteration over all memory types."""
         types = list(MemoryType)
-        assert len(types) == 10
+        assert len(types) == 9
         assert all(isinstance(t, MemoryType) for t in types)
 
     def test_memory_type_string_representation(self):

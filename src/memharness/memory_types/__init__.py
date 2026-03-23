@@ -17,7 +17,6 @@ from memharness.memory_types.file import FileMixin
 from memharness.memory_types.generic import GenericMixin
 from memharness.memory_types.knowledge import KnowledgeMixin
 from memharness.memory_types.persona import PersonaMixin
-from memharness.memory_types.skills import SkillsMixin
 from memharness.memory_types.summary import SummaryMixin
 from memharness.memory_types.tool_log import ToolLogMixin
 from memharness.memory_types.toolbox import ToolboxMixin
@@ -32,7 +31,6 @@ __all__ = [
     "ToolboxMixin",
     "SummaryMixin",
     "ToolLogMixin",
-    "SkillsMixin",
     "FileMixin",
     "PersonaMixin",
     "GenericMixin",

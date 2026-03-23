@@ -85,7 +85,6 @@ class PostgresSchemaManager:
             await self._create_entity_table(conn)
             await self._create_workflow_table(conn)
             await self._create_toolbox_table(conn)
-            await self._create_skills_table(conn)
             await self._create_file_table(conn)
             await self._create_persona_table(conn)
 
@@ -412,50 +411,6 @@ class PostgresSchemaManager:
         """)
 
         self._initialized_tables.add("toolbox_memory")
-
-    async def _create_skills_table(self, conn: asyncpg.Connection) -> None:
-        """Create skills memory table (Vector-based)."""
-        vector_dim = self._conn_manager.vector_dim
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS skills_memory (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                key TEXT NOT NULL UNIQUE,
-                namespace TEXT[] NOT NULL DEFAULT '{{}}'::TEXT[],
-                content TEXT NOT NULL,
-                embedding vector({vector_dim}),
-                metadata JSONB DEFAULT '{{}}',
-                skill_name TEXT NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_embedding
-            ON skills_memory USING hnsw(embedding vector_cosine_ops)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_name
-            ON skills_memory(skill_name)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_namespace
-            ON skills_memory USING GIN(namespace)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_key
-            ON skills_memory(key)
-        """)
-
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_skills_content_trgm
-            ON skills_memory USING GIN(content gin_trgm_ops)
-        """)
-
-        self._initialized_tables.add("skills_memory")
 
     async def _create_file_table(self, conn: asyncpg.Connection) -> None:
         """Create file memory table (Hybrid - Vector + metadata)."""

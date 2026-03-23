@@ -238,15 +238,8 @@ class MemoryToolExecutor:
                     outcome=outcome,
                     result=content,
                 )
-            elif memory_type == "skills":
-                # For skills, we need skill name and description
-                skill_name = metadata.get("name", "Skill") if metadata else "Skill"
-                memory_id = await self.memory.add_skill(
-                    skill_name=skill_name,
-                    description=content,
-                )
             else:
-                valid_types = "knowledge_base, entity, workflow, skills"
+                valid_types = "knowledge_base, entity, workflow"
                 return f"Error: Invalid memory type '{memory_type}'. Valid types: {valid_types}"
         except Exception as e:
             return f"Error writing memory: {e}"

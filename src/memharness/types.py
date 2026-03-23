@@ -32,7 +32,6 @@ class MemoryType(str, Enum):
     TOOLBOX = "toolbox"
     SUMMARY = "summary"
     TOOL_LOG = "tool_log"
-    SKILLS = "skills"
     FILE = "file"
     PERSONA = "persona"
 

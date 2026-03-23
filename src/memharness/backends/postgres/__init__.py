@@ -69,7 +69,6 @@ class PostgresBackend:
     - workflow_memory: Vector-based for procedures
     - toolbox_memory: Vector-based with VFS path support
     - summary_memory: Vector-based compressed representations
-    - skills_memory: Vector-based learned capabilities
     - file_memory: Hybrid vector + file metadata
     - persona_memory: Vector-based agent identity
     """

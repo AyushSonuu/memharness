@@ -14,6 +14,7 @@ leverage LLMs when provided for more intelligent operations.
 
 from memharness.agents.base import BaseMemoryAgent
 from memharness.agents.consolidator import ConsolidatorAgent
+from memharness.agents.context_assembler import AssembledContext, ContextAssemblyAgent
 from memharness.agents.entity_extractor import EntityExtractorAgent
 from memharness.agents.gc import GCAgent
 from memharness.agents.summarizer import SummarizerAgent
@@ -24,4 +25,6 @@ __all__ = [
     "EntityExtractorAgent",
     "ConsolidatorAgent",
     "GCAgent",
+    "AssembledContext",
+    "ContextAssemblyAgent",
 ]

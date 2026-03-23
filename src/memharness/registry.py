@@ -117,7 +117,6 @@ class MemoryTypeRegistry:
         - toolbox: Tool definitions (VECTOR)
         - summary: Compressed memories (VECTOR)
         - tool_log: Execution records (SQL, ordered)
-        - skills: Learned patterns (VECTOR)
         - file: File references (VECTOR)
         - persona: Agent identity (VECTOR)
 
@@ -151,7 +150,7 @@ class MemoryTypeRegistry:
         return cls._instance
 
     def _register_builtin_types(self) -> None:
-        """Register all 10 built-in memory types with their default configurations."""
+        """Register all 9 built-in memory types with their default configurations."""
 
         # SQL-backed types (ordered, no embedding needed for primary retrieval)
         self.register(
@@ -318,28 +317,6 @@ class MemoryTypeRegistry:
                         "source_count": {"type": "integer"},
                     },
                     "required": ["summary_type"],
-                },
-            )
-        )
-
-        self.register(
-            MemoryTypeConfig(
-                name=MemoryType.SKILLS.value,
-                storage=StorageType.VECTOR,
-                index_type="hnsw",
-                default_k=5,
-                supports_embedding=True,
-                ordered=False,
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "skill_name": {"type": "string"},
-                        "capability": {"type": "string"},
-                        "learned_from": {"type": "string"},
-                        "success_rate": {"type": "number"},
-                        "usage_count": {"type": "integer"},
-                    },
-                    "required": ["skill_name", "capability"],
                 },
             )
         )
