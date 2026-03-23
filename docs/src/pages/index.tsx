@@ -127,32 +127,85 @@ function QuickStart() {
       <div className="container">
         <div className="row">
           <div className="col col--8 col--offset-2">
-            <Heading as="h2" className="text--center" style={{marginBottom: '1.5rem'}}>
-              Quick Start
+            <Heading as="h2" className="text--center" style={{marginBottom: '0.5rem'}}>
+              Use with LangChain Agent
             </Heading>
+            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1.5rem'}}>
+              Give any agent persistent, searchable memory in 10 lines
+            </p>
             <pre style={{
               padding: '1.5rem',
               borderRadius: '8px',
-              fontSize: '0.9rem',
+              fontSize: '0.85rem',
               lineHeight: '1.6',
             }}>
               <code>{`from memharness import MemoryHarness
+from memharness.tools import get_memory_tools
+from langchain.agents import create_agent
 
-async with MemoryHarness("sqlite:///memory.db") as memory:
-    # Store a conversation
-    await memory.add_conversational("thread1", "user", "Hello!")
+# 1. Create memory harness
+harness = MemoryHarness("sqlite:///agent_memory.db")
+await harness.connect()
 
-    # Add knowledge
-    await memory.add_knowledge(
-        "Python supports async/await for concurrent programming",
-        source="docs"
-    )
+# 2. Get 12 memory tools (search, read, write, expand, summarize, etc.)
+memory_tools = get_memory_tools(harness)
 
-    # Search semantically
-    results = await memory.search_knowledge("concurrency in Python")
+# 3. Create a memory-aware agent
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",  # or any LLM
+    tools=memory_tools + your_other_tools,
+    system_prompt="""You are a helpful assistant with persistent memory.
+Use your memory tools to remember important information across conversations.
+Before answering, search your memory for relevant context.""",
+)
 
-    # Assemble context for your agent
-    context = await memory.assemble_context("async programming", "thread1")`}</code>
+# 4. The agent can now:
+#    - Search past conversations, knowledge, entities, workflows
+#    - Write important facts to knowledge base
+#    - Log tool executions for audit trail
+#    - Save successful task patterns as reusable workflows
+#    - Expand compacted summaries for full detail
+#    - Assemble complete context from all memory types
+result = await agent.ainvoke({
+    "messages": [{"role": "user", "content": "What did we discuss yesterday?"}]
+})`}</code>
+            </pre>
+          </div>
+        </div>
+      </div>
+      <div className="container" style={{paddingTop: '2rem'}}>
+        <div className="row">
+          <div className="col col--8 col--offset-2">
+            <Heading as="h2" className="text--center" style={{marginBottom: '0.5rem'}}>
+              Or Use Standalone
+            </Heading>
+            <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1.5rem'}}>
+              No framework needed — memharness works with any Python code
+            </p>
+            <pre style={{
+              padding: '1.5rem',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              lineHeight: '1.6',
+            }}>
+              <code>{`from memharness import MemoryHarness
+from memharness.agents import ContextAssemblyAgent
+
+async with MemoryHarness("sqlite:///memory.db") as harness:
+    # Store memories
+    await harness.add_conversational("thread-1", "user", "I prefer Python over JS")
+    await harness.add_knowledge("Python 3.13 has free-threaded mode", source="docs")
+    await harness.add_entity("Alice", "PERSON", "Senior engineer at Acme Corp")
+
+    # Assemble context for any LLM (BEFORE-loop pattern)
+    ctx_agent = ContextAssemblyAgent(harness)
+    ctx = await ctx_agent.assemble("Tell me about Python", thread_id="thread-1")
+
+    # Get as LangChain messages (HumanMessage, AIMessage, SystemMessage)
+    messages = ctx.to_messages()
+
+    # Or as markdown prompt string
+    prompt = ctx.to_prompt()`}</code>
             </pre>
           </div>
         </div>
