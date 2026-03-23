@@ -19,7 +19,6 @@ import asyncio
 from memharness import MemoryHarness
 from memharness.tools import get_read_tools
 from memharness.agents import ContextAssemblyAgent
-from memharness.agents.agent_workflow import MemoryWorkflowMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -91,9 +90,32 @@ class ConversationMiddleware(AgentMiddleware):
         return None
 
 
-# ── AFTER middleware: MemoryWorkflowMiddleware (from package) ────────
-# Handles: save_response → extract_entities → save_workflow → check_summarization
-# This is a LangGraph workflow wrapped as middleware — already in the package!
+# ── AFTER middleware: handle entity extraction + workflow saving ────
+class AfterMiddleware(AgentMiddleware):
+    def __init__(self, harness, thread_id):
+        super().__init__()
+        self.harness = harness
+        self.thread_id = thread_id
+
+    async def abefore_model(self, state, runtime):
+        return None
+
+    async def aafter_model(self, state, runtime):
+        msgs = state.get("messages", [])
+        last = msgs[-1] if msgs else None
+        if not isinstance(last, AIMessage) or not last.content:
+            return None
+        # Extract entities (regex, no LLM)
+        try:
+            from memharness.agents import EntityExtractorAgent
+            ext = EntityExtractorAgent(self.harness)
+            entities = await ext.extract_entities(last.content)
+            for cat, names in entities.items():
+                for name in names:
+                    await self.harness.add_entity(name, cat, f"{cat}: {name}")
+        except Exception:
+            pass
+        return None
 
 
 async def main():
@@ -111,7 +133,7 @@ async def main():
         middleware=[
             ContextMiddleware(harness, thread_id),             # BEFORE: inject context
             ConversationMiddleware(harness, thread_id),         # BEFORE+AFTER: messages
-            MemoryWorkflowMiddleware(harness, thread_id),       # AFTER: entities + workflow + summarize
+            AfterMiddleware(harness, thread_id),                 # AFTER: extract entities
         ],
     )
 

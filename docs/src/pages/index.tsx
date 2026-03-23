@@ -122,7 +122,6 @@ function Feature({title, emoji, description}: FeatureItem) {
 
 const agentExample = `from memharness import MemoryHarness
 from memharness.tools import get_read_tools
-from memharness.agents.agent_workflow import MemoryWorkflowMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -165,7 +164,7 @@ agent = create_agent(
     tools=get_read_tools(harness),       # 5 read-only tools
     middleware=[
         ContextMiddleware(harness, thread_id),          # BEFORE: context + save msgs
-        MemoryWorkflowMiddleware(harness, thread_id),   # AFTER: entities + workflow + summarize
+        # Add your own AFTER middleware for entities + workflow (see docs)
     ],
 )
 
