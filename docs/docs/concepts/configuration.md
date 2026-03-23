@@ -194,7 +194,7 @@ backend: memory://
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `default_max_tokens` | int | 4000 | Default token budget |
-| `priorities` | dict | {...} | Token allocation per type |
+| `priorities` | dict | `{...}` | Token allocation per type |
 | `expand_summaries` | bool | false | Auto-expand summaries |
 
 ## Duration Format

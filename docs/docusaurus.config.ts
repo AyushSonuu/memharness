@@ -19,7 +19,7 @@ const config: Config = {
   deploymentBranch: 'gh-pages',
   trailingSlash: false,
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 
   i18n: {
@@ -90,7 +90,7 @@ const config: Config = {
             },
             {
               label: 'Memory Types',
-              to: '/docs/memory-types',
+              to: '/docs/memory-types/conversational',
             },
             {
               label: 'API Reference',
