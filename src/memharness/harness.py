@@ -712,6 +712,10 @@ class MemoryHarness:
 
     async def _embed(self, text: str) -> list[float]:
         """Generate an embedding for the given text."""
+        if text is None:
+            raise TypeError("Cannot embed None text")
+        if not isinstance(text, str):
+            raise TypeError(f"Expected str, got {type(text).__name__}")
         return self._embedding_fn(text)
 
     def _create_unit(
@@ -1517,6 +1521,8 @@ class MemoryHarness:
         name: str,
         description: str,
         examples: list[str] | None = None,
+        category: str | None = None,
+        **kwargs: Any,
     ) -> str:
         """
         Add a learned skill to memory.
@@ -1525,6 +1531,8 @@ class MemoryHarness:
             name: Name of the skill.
             description: Description of what the skill does.
             examples: Optional list of example usages.
+            category: Optional category for the skill.
+            **kwargs: Additional skill attributes.
 
         Returns:
             The ID of the created skill memory.
@@ -1544,6 +1552,8 @@ class MemoryHarness:
         namespace = self._build_namespace(MemoryType.SKILLS)
 
         content = f"Skill: {name}\n{description}"
+        if category:
+            content += f"\nCategory: {category}"
         if examples:
             content += "\nExamples:\n" + "\n".join(f"- {ex}" for ex in examples)
 
@@ -1553,6 +1563,8 @@ class MemoryHarness:
             "name": name,
             "description": description,
             "examples": examples or [],
+            "category": category,
+            **kwargs,
         }
 
         unit = self._create_unit(
@@ -1775,6 +1787,324 @@ class MemoryHarness:
             blocks.append(f"## {block_name}\n{unit.content}")
 
         return "\n\n".join(blocks)
+
+    async def set_persona(
+        self,
+        name: str,
+        traits: list[str] | None = None,
+        communication_style: str | None = None,
+        domain_expertise: list[str] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """
+        Set the active persona for the agent.
+
+        Args:
+            name: Name of the persona.
+            traits: List of personality traits.
+            communication_style: Communication style description.
+            domain_expertise: List of domain expertise areas.
+            **kwargs: Additional persona attributes.
+
+        Returns:
+            The ID of the created persona.
+
+        Example:
+            ```python
+            persona_id = await harness.set_persona(
+                name="Technical Expert",
+                traits=["concise", "technical", "helpful"],
+                communication_style="professional",
+                domain_expertise=["python", "devops"]
+            )
+            ```
+        """
+        # Construct persona content
+        content_parts = [f"Persona: {name}"]
+
+        if traits:
+            content_parts.append(f"Traits: {', '.join(traits)}")
+
+        if communication_style:
+            content_parts.append(f"Communication Style: {communication_style}")
+
+        if domain_expertise:
+            content_parts.append(f"Domain Expertise: {', '.join(domain_expertise)}")
+
+        for key, value in kwargs.items():
+            content_parts.append(f"{key.replace('_', ' ').title()}: {value}")
+
+        content = "\n".join(content_parts)
+
+        # Store as persona block
+        return await self.add_persona(block_name=name, content=content)
+
+    async def get_active_persona(self) -> MemoryUnit | None:
+        """
+        Get the active persona.
+
+        Returns:
+            The active persona as a MemoryUnit, or None if no persona is set.
+
+        Example:
+            ```python
+            persona = await harness.get_active_persona()
+            if persona:
+                print(persona.content)
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.PERSONA)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.PERSONA,
+            limit=1,
+        )
+        return results[0] if results else None
+
+    # =========================================================================
+    # Tool Log Memory
+    # =========================================================================
+
+    async def log_tool_execution(
+        self,
+        tool_name: str,
+        input_params: dict[str, Any],
+        output_result: dict[str, Any] | None = None,
+        success: bool = True,
+        duration_ms: int | None = None,
+        error: str | None = None,
+    ) -> str:
+        """
+        Log a tool execution.
+
+        Args:
+            tool_name: Name of the tool executed.
+            input_params: Input parameters passed to the tool.
+            output_result: Output result from the tool.
+            success: Whether the execution was successful.
+            duration_ms: Duration in milliseconds.
+            error: Error message if execution failed.
+
+        Returns:
+            The ID of the created log entry.
+
+        Example:
+            ```python
+            log_id = await harness.log_tool_execution(
+                tool_name="github.create_pr",
+                input_params={"title": "Fix bug", "body": "Description"},
+                output_result={"pr_number": 123},
+                success=True,
+                duration_ms=500
+            )
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOL_LOG, tool_name)
+
+        # Construct log content
+        content_parts = [f"Tool: {tool_name}"]
+        content_parts.append(f"Status: {'success' if success else 'error'}")
+
+        if duration_ms:
+            content_parts.append(f"Duration: {duration_ms}ms")
+
+        if input_params:
+            content_parts.append(f"Input: {json.dumps(input_params, indent=2)}")
+
+        if output_result:
+            content_parts.append(f"Output: {json.dumps(output_result, indent=2)}")
+
+        if error:
+            content_parts.append(f"Error: {error}")
+
+        content = "\n".join(content_parts)
+
+        metadata = {
+            "tool_name": tool_name,
+            "status": "success" if success else "error",
+            "input": input_params,
+            "output": output_result,
+            "duration_ms": duration_ms,
+            "error": error,
+        }
+
+        unit = self._create_unit(
+            content=content,
+            memory_type=MemoryType.TOOL_LOG,
+            namespace=namespace,
+            metadata=metadata,
+            embedding=None,  # Tool logs don't need embeddings
+        )
+
+        return await self._backend.store(unit)
+
+    async def search_tool_logs(
+        self,
+        query: str,
+        k: int = 10,
+    ) -> list[MemoryUnit]:
+        """
+        Search tool execution logs.
+
+        Args:
+            query: Search query (tool name or partial match).
+            k: Number of results to return.
+
+        Returns:
+            List of matching tool log memory units.
+
+        Example:
+            ```python
+            logs = await harness.search_tool_logs("github")
+            for log in logs:
+                print(log.metadata.get("tool_name"))
+            ```
+        """
+        namespace = self._build_namespace(MemoryType.TOOL_LOG)
+        results = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.TOOL_LOG,
+            limit=k,
+        )
+
+        # Filter by query if provided
+        if query:
+            filtered = [
+                r
+                for r in results
+                if query.lower() in r.metadata.get("tool_name", "").lower()
+                or query.lower() in r.content.lower()
+            ]
+            return filtered[:k]
+
+        return results[:k]
+
+    # =========================================================================
+    # Multi-Type Operations
+    # =========================================================================
+
+    async def search_all(
+        self,
+        query: str,
+        k: int = 5,
+        memory_types: list[MemoryType] | None = None,
+    ) -> list[MemoryUnit]:
+        """
+        Search across multiple memory types.
+
+        Args:
+            query: Search query.
+            k: Total number of results to return.
+            memory_types: Optional list of memory types to search. If None, searches all.
+
+        Returns:
+            List of memory units from all searched types, sorted by relevance.
+
+        Example:
+            ```python
+            results = await harness.search_all("Python", k=10)
+            for result in results:
+                print(f"{result.memory_type}: {result.content[:50]}")
+            ```
+        """
+        if memory_types is None:
+            # Search all vector-based types
+            memory_types = [
+                MemoryType.KNOWLEDGE,
+                MemoryType.ENTITY,
+                MemoryType.WORKFLOW,
+                MemoryType.TOOLBOX,
+                MemoryType.SKILLS,
+                MemoryType.FILE,
+            ]
+
+        all_results = []
+        per_type_k = max(1, k // len(memory_types))
+
+        for mem_type in memory_types:
+            try:
+                results = await self.search(
+                    query=query,
+                    memory_type=mem_type.value,
+                    k=per_type_k,
+                )
+                all_results.extend(results)
+            except Exception:
+                # Skip types that fail
+                continue
+
+        # Sort by relevance if available, otherwise by recency
+        all_results.sort(
+            key=lambda x: (
+                getattr(x, "score", 0) if hasattr(x, "score") else 0,
+                x.created_at,
+            ),
+            reverse=True,
+        )
+
+        return all_results[:k]
+
+    async def get_stats(self) -> dict[str, Any]:
+        """
+        Get memory statistics.
+
+        Returns:
+            Dictionary containing statistics about stored memories.
+
+        Example:
+            ```python
+            stats = await harness.get_stats()
+            print(f"Total conversations: {stats['conversational']}")
+            print(f"Total knowledge: {stats['knowledge']}")
+            ```
+        """
+        stats = {}
+
+        for mem_type in MemoryType:
+            try:
+                namespace = self._build_namespace(mem_type)
+                results = await self._backend.list_by_namespace(
+                    namespace=namespace,
+                    memory_type=mem_type,
+                    limit=10000,  # Large limit to count all
+                )
+                stats[mem_type.value] = len(results)
+            except Exception:
+                stats[mem_type.value] = 0
+
+        stats["total"] = sum(stats.values())
+        return stats
+
+    async def clear_thread(self, thread_id: str) -> int:
+        """
+        Clear all memories associated with a specific thread.
+
+        Args:
+            thread_id: The thread ID to clear.
+
+        Returns:
+            Number of memories deleted.
+
+        Example:
+            ```python
+            deleted = await harness.clear_thread("thread_123")
+            print(f"Deleted {deleted} memories")
+            ```
+        """
+        # Get all conversational memories for the thread
+        # Thread ID is part of the namespace
+        namespace = self._build_namespace(MemoryType.CONVERSATIONAL, thread_id)
+        memories = await self._backend.list_by_namespace(
+            namespace=namespace,
+            memory_type=MemoryType.CONVERSATIONAL,
+            limit=10000,
+        )
+
+        # Delete each memory
+        for memory in memories:
+            await self._backend.delete(memory.id)
+
+        return len(memories)
 
     # =========================================================================
     # Generic Operations
