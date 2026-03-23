@@ -12,7 +12,6 @@ memory tools called by AI agents, returning nicely formatted string results.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -272,7 +271,7 @@ class MemoryToolExecutor:
         Returns:
             Formatted statistics overview.
         """
-        stats = await self.memory.stats()
+        stats = await self.memory.get_stats()
 
         lines = [
             "Memory Statistics",
@@ -393,9 +392,13 @@ class MemoryToolExecutor:
         # Use the harness's toolbox_tree method directly
         try:
             tree_str = await self.memory.toolbox_tree(path=path)
-            return tree_str if tree_str else self._format_empty_results(
-                "toolbox_tree",
-                f"No tools found at path: '{path}'",
+            return (
+                tree_str
+                if tree_str
+                else self._format_empty_results(
+                    "toolbox_tree",
+                    f"No tools found at path: '{path}'",
+                )
             )
         except Exception as e:
             return self._format_empty_results(
@@ -424,7 +427,9 @@ class MemoryToolExecutor:
         try:
             tools = await self.memory.toolbox_ls(server=server)
             if not tools:
-                return self._format_empty_results("toolbox_ls", f"No tools found in server '{server}'")
+                return self._format_empty_results(
+                    "toolbox_ls", f"No tools found in server '{server}'"
+                )
 
             lines = [f"[{server}] ({len(tools)} tools)"]
             for tool in tools:
@@ -598,7 +603,11 @@ class MemoryToolExecutor:
         """Format a single memory search result."""
         # Result is a MemoryUnit object (dataclass)
         memory_id = result.id
-        memory_type = result.memory_type.value if hasattr(result.memory_type, "value") else str(result.memory_type)
+        memory_type = (
+            result.memory_type.value
+            if hasattr(result.memory_type, "value")
+            else str(result.memory_type)
+        )
         content = result.content
 
         # If the result has a score (from search), show it

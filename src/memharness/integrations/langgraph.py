@@ -534,7 +534,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             Serialized checkpoint string.
         """
         if self.serde:
-            return self.serde.dumps_typed(checkpoint)[0] if hasattr(self.serde, "dumps_typed") else json.dumps(checkpoint, default=str)
+            return (
+                self.serde.dumps_typed(checkpoint)[0]
+                if hasattr(self.serde, "dumps_typed")
+                else json.dumps(checkpoint, default=str)
+            )
         return json.dumps(checkpoint, default=str)
 
     def _deserialize_checkpoint(self, data: str) -> Checkpoint:
@@ -548,7 +552,11 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             The checkpoint data.
         """
         if self.serde:
-            return self.serde.loads_typed((data, "json")) if hasattr(self.serde, "loads_typed") else json.loads(data)
+            return (
+                self.serde.loads_typed((data, "json"))
+                if hasattr(self.serde, "loads_typed")
+                else json.loads(data)
+            )
         return json.loads(data)
 
     def _serialize_metadata(self, metadata: CheckpointMetadata) -> str:
