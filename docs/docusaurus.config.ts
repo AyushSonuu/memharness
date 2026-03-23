@@ -11,6 +11,11 @@ const config: Config = {
     v4: true,
   },
 
+  markdown: {
+    mermaid: true,
+  },
+  themes: ['@docusaurus/theme-mermaid'],
+
   url: 'https://ayushsonuu.github.io',
   baseUrl: '/memharness/',
 
