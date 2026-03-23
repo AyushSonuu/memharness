@@ -267,7 +267,9 @@ class ContextAssemblyAgent:
         if wf_results:
             ctx.workflows = "\n".join(f"- {r.content}" for r in wf_results)
 
-        # Entities (people, places, concepts)
+        # Entities (people, places, concepts) - prefer recent (updated_at DESC)
+        # The backend search methods should sort by updated_at DESC to handle staleness
+        # (e.g., prefer "works at SAP" over "works at Google" for the same person)
         entity_results = await self.harness.search_entity(query, k=5)
         if entity_results:
             ctx.entities = "\n".join(
