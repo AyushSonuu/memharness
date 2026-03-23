@@ -99,20 +99,6 @@ class MemoryWriteInput(BaseModel):
     )
 
 
-class ToolboxSearchInput(BaseModel):
-    """Input schema for toolbox search."""
-
-    pattern: str | None = Field(
-        default=None,
-        description="Optional regex pattern to search for (grep mode). If not provided, shows tree view.",
-    )
-    case_sensitive: bool = Field(
-        default=False, description="Whether the search is case-sensitive (grep mode only)"
-    )
-    path: str = Field(default="/", description="Path to start from (tree mode only)")
-    depth: int = Field(default=3, description="Maximum depth to display (tree mode only, 1-5)")
-
-
 class ExpandSummaryInput(BaseModel):
     """Input schema for expand summary."""
 
@@ -408,69 +394,54 @@ class MemoryWriteTool(BaseTool):
             return f"Error writing to memory: {e}"
 
 
-class ToolboxSearchTool(BaseTool):
-    """
-    Search and explore available tools in your toolbox.
+class ToolboxSearchInput(BaseModel):
+    """Input schema for toolbox search tool."""
 
-    This tool combines tree view and grep functionality. If a pattern is provided,
-    it searches for tools matching that pattern (grep mode). If no pattern is given,
-    it shows a tree view of all tools organized by server/category.
+    query: str = Field(description="What kind of tool are you looking for?")
+    k: int = Field(default=5, description="Number of tools to return (1-20)")
+
+
+class ToolboxSearchTool(BaseTool):
+    """Search for relevant tools using semantic similarity.
+
+    This implements the Toolbox Pattern from L04: instead of stuffing all tools
+    into context, search the toolbox vector DB and return only the most
+    relevant tools for the current query.
     """
 
     name: str = "toolbox_search"
     description: str = (
-        "Search and explore available tools in your toolbox. "
-        "Provide a 'pattern' to search for specific tools (grep mode), "
-        "or leave pattern empty to see a tree view of all tools organized by server/category."
+        "Search for relevant tools by describing what you need. "
+        "Returns the most relevant tools from the toolbox using semantic similarity. "
+        "Example: 'search the web' or 'create a github issue'."
     )
     args_schema: type[BaseModel] = ToolboxSearchInput
-    harness: Any  # MemoryHarness instance
+    harness: Any
 
     def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
         if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
-            )
+            raise ImportError("langchain-core required. Install: pip install langchain-core")
         super().__init__(harness=harness, **kwargs)
 
     def _run(self, **kwargs: Any) -> str:
-        """Sync execution (not supported for async harness)."""
         raise NotImplementedError("Use async version (_arun) instead")
 
-    async def _arun(
-        self,
-        pattern: str | None = None,
-        case_sensitive: bool = False,
-        path: str = "/",
-        depth: int = 3,
-    ) -> str:
-        """
-        Execute toolbox search.
+    async def _arun(self, query: str, k: int = 5) -> str:
+        """Search for tools by semantic similarity."""
+        try:
+            results = await self.harness.search_tools(query, k=k)
+            if not results:
+                return "No tools found matching your query."
 
-        Args:
-            pattern: Optional regex pattern to search for (grep mode).
-            case_sensitive: Whether the search is case-sensitive.
-            path: Starting path for tree view.
-            depth: Maximum depth for tree view.
-
-        Returns:
-            Formatted tree or search results.
-        """
-        from memharness.tools.executor import MemoryToolExecutor
-
-        executor = MemoryToolExecutor(self.harness)
-
-        # Grep mode if pattern is provided
-        if pattern:
-            return await executor.execute(
-                "toolbox_grep", pattern=pattern, case_sensitive=case_sensitive
-            )
-        # Tree mode otherwise
-        else:
-            return await executor.execute("toolbox_tree", path=path, depth=depth)
-
+            lines = [f"Found {len(results)} relevant tool(s):\n"]
+            for i, tool in enumerate(results, 1):
+                name = tool.metadata.get("tool_name", "unknown")
+                server = tool.metadata.get("server", "")
+                desc = tool.content[:200]
+                lines.append(f"{i}. {server}/{name}: {desc}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error searching tools: {e}"
 
 class ExpandSummaryTool(BaseTool):
     """

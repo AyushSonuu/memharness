@@ -276,3 +276,34 @@ class ToolboxMixin(BaseMixin):
                 }
 
         raise KeyError(f"Tool not found: {tool_path}")
+
+    async def search_tools(self, query: str, k: int = 5) -> list:
+        """Search for relevant tools using semantic similarity.
+
+        This is the core Toolbox Pattern from L04: instead of stuffing all tools
+        into the context, search the toolbox vector DB and return only the
+        top-K most relevant tools for the current query.
+
+        Args:
+            query: Natural language query describing what tool is needed.
+            k: Number of tools to return (default 5).
+
+        Returns:
+            List of MemoryUnit objects for matching tools.
+
+        Example:
+            ```python
+            tools = await harness.search_tools("search the web")
+            for t in tools:
+                print(f"{t.metadata.get('tool_name')}: {t.content}")
+            ```
+        """
+        from memharness.types import MemoryType
+
+        embedding = await self._embed(query)
+        return await self._backend.search(
+            query_embedding=embedding,
+            memory_type=MemoryType.TOOLBOX,
+            namespace=self._namespace_prefix + (MemoryType.TOOLBOX.value,),
+            k=k,
+        )

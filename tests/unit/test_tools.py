@@ -137,42 +137,18 @@ class TestMemoryTools:
         assert "logged" in result.lower() or "successfully" in result.lower()
         assert "github/create_issue" in result
 
-    async def test_toolbox_search_tool_tree_mode(self, harness):
-        """Test ToolboxSearchTool in tree mode (no pattern)."""
-        # Add some toolbox entries
+    async def test_toolbox_search_tool(self, harness):
+        """Test ToolboxSearchTool semantic search."""
+        # Add a tool first
         await harness.add_tool(
-            server="test_server",
-            tool_name="test_tool",
-            description="A test tool",
-            parameters={"type": "function"},
+            server="github",
+            tool_name="create_issue",
+            description="Create a new GitHub issue",
+            parameters={"title": "string"},
         )
 
         tool = ToolboxSearchTool(harness=harness)
-
-        # Test tree mode (no pattern)
-        result = await tool._arun(pattern=None, path="/", depth=2)
-        assert isinstance(result, str)
-
-    async def test_toolbox_search_tool_grep_mode(self, harness):
-        """Test ToolboxSearchTool in grep mode (with pattern)."""
-        # Add toolbox entries
-        await harness.add_tool(
-            server="test_server",
-            tool_name="search_tool",
-            description="A tool for searching",
-            parameters={"type": "function"},
-        )
-        await harness.add_tool(
-            server="test_server",
-            tool_name="write_tool",
-            description="A tool for writing",
-            parameters={"type": "function"},
-        )
-
-        tool = ToolboxSearchTool(harness=harness)
-
-        # Test grep mode (with pattern)
-        result = await tool._arun(pattern="search", case_sensitive=False)
+        result = await tool._arun(query="create issue", k=3)
         assert isinstance(result, str)
 
     async def test_tool_with_no_results(self, harness):

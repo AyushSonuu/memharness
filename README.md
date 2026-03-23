@@ -155,3 +155,11 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Roadmap
+
+- [ ] **Memory Unit Augmentation** (L04) — LLM-enhanced tool descriptions for better semantic retrieval
+- [ ] **VFS Explorer Agent** — BFS-based tool discovery agent (main agent stays focused on task)
+- [ ] **Structured workflow steps** — `{step, action, tool, status, output}` instead of flat strings
+- [ ] **Timeline/graph-based entity connections** — track entity changes over time
+- [ ] **Context window monitor dashboard** — ok/warning/critical with token counts
