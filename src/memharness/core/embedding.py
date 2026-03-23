@@ -2,9 +2,11 @@
 # Copyright (c) 2026 Ayush Sonuu
 # Licensed under MIT License
 
-"""Default embedding function for memharness."""
+"""Embedding functions for memharness."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 
 def default_embedding_fn(text: str) -> list[float]:
@@ -43,3 +45,54 @@ def default_embedding_fn(text: str) -> list[float]:
         embedding = [x / norm for x in embedding]
 
     return embedding
+
+
+def create_huggingface_embedding_fn(
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+) -> Callable[[str], list[float]]:
+    """
+    Create an embedding function using HuggingFace via LangChain.
+
+    This function requires the `langchain-huggingface` package to be installed.
+    Install it with: pip install memharness[embeddings]
+
+    Args:
+        model_name: The HuggingFace model to use for embeddings.
+            Default is 'sentence-transformers/all-MiniLM-L6-v2' (384 dimensions).
+
+    Returns:
+        A callable that takes text and returns an embedding vector.
+
+    Raises:
+        ImportError: If langchain-huggingface is not installed.
+
+    Example:
+        ```python
+        from memharness.core.embedding import create_huggingface_embedding_fn
+
+        # Create embedding function
+        embed_fn = create_huggingface_embedding_fn()
+
+        # Use with MemoryHarness
+        harness = MemoryHarness(
+            "sqlite:///memory.db",
+            embedding_fn=embed_fn
+        )
+        ```
+    """
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+    except ImportError as e:
+        raise ImportError(
+            "HuggingFace embeddings require langchain-huggingface. "
+            "Install with: pip install memharness[embeddings]"
+        ) from e
+
+    # Initialize the embeddings model
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
+
+    def embed(text: str) -> list[float]:
+        """Embed text using HuggingFace model."""
+        return embeddings.embed_query(text)
+
+    return embed
