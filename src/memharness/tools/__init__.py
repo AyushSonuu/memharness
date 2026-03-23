@@ -33,6 +33,9 @@ Usage:
 
 from memharness.tools.definitions import (
     LANGCHAIN_AVAILABLE,
+    AssembleContextTool,
+    ConversationHistoryTool,
+    ExpandSummaryTool,
     MemoryReadTool,
     MemorySearchTool,
     MemoryStatsTool,
@@ -52,5 +55,8 @@ __all__ = [
     "MemoryStatsTool",
     "ToolboxTreeTool",
     "ToolboxGrepTool",
+    "ExpandSummaryTool",
+    "ConversationHistoryTool",
+    "AssembleContextTool",
     "LANGCHAIN_AVAILABLE",
 ]

@@ -8,7 +8,7 @@ memharness provides a set of LangChain-compatible tools that enable AI agents to
 
 ## Available Tools
 
-The toolkit consists of 6 specialized tools organized into two categories:
+The toolkit consists of 9 specialized tools organized into three categories:
 
 ### Memory Management Tools
 
@@ -18,6 +18,14 @@ These tools allow agents to search, read, write, and analyze their memory:
 - **MemoryReadTool** - Read a specific memory by its ID
 - **MemoryWriteTool** - Write new information to memory
 - **MemoryStatsTool** - Get memory statistics and usage information
+
+### Context Operations Tools
+
+These tools enable context assembly and expansion for efficient memory operations:
+
+- **ExpandSummaryTool** - Expand compacted summaries back to full original content
+- **ConversationHistoryTool** - Get conversation history for a thread as a list of messages
+- **AssembleContextTool** - Assemble all relevant memory context (persona, history, knowledge, workflows, entities)
 
 ### Toolbox Exploration Tools
 
@@ -115,6 +123,30 @@ No parameters required.
 {
     "pattern": str,           # Regex pattern to search for
     "case_sensitive": bool    # Whether search is case-sensitive (default: False)
+}
+```
+
+### ExpandSummaryInput
+```python
+{
+    "summary_id": str  # ID of the summary to expand
+}
+```
+
+### ConversationHistoryInput
+```python
+{
+    "thread_id": str,  # Conversation thread ID
+    "limit": int       # Max messages to retrieve (default: 20)
+}
+```
+
+### AssembleContextInput
+```python
+{
+    "query": str,         # Query to assemble context for
+    "thread_id": str,     # Conversation thread ID
+    "max_tokens": int     # Maximum tokens in assembled context (default: 4000)
 }
 ```
 
