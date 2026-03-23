@@ -1,16 +1,37 @@
-# LangChain Integration
+---
+sidebar_position: 2
+---
 
-Complete working guide for using memharness with LangChain agents, including conversation persistence.
+# Usage with LangChain
 
-## Installation
+This guide shows how to use memharness with LangChain agents. memharness provides the memory infrastructure — you wire it into your agent via middleware.
+
+## Install
 
 ```bash
-pip install memharness langchain langchain-anthropic
+pip install memharness langchain langgraph langchain-anthropic
+# or any LLM provider: langchain-openai, langchain-google-genai, etc.
 ```
 
-## Basic Agent with Memory Tools
+## Architecture
 
-Here's a complete, runnable example of a LangChain agent with memory tools:
+```mermaid
+graph TD
+    U["👤 User message"] --> MW1["🔄 BEFORE middleware"]
+    MW1 --> |"1. Save user msg to conv table"| DB["🗄️ memharness DB"]
+    MW1 --> |"2. Load context from all tables"| DB
+    MW1 --> |"3. Inject as SystemMessage"| AGENT
+    AGENT["🤖 Your Agent (LLM + read tools)"] --> MW2["🔄 AFTER middleware"]
+    MW2 --> |"4. Save response to conv table"| DB
+    MW2 --> |"5. Extract entities"| DB
+    MW2 --> |"6. Save workflow if tools used"| DB
+    MW2 --> RESP["💬 Response to user"]
+```
+
+**Your agent only gets READ tools** — it searches and reads memory.
+**Middleware handles all WRITES** — saves messages, extracts entities, stores workflows.
+
+## Quick Start
 
 ```python
 import asyncio
@@ -18,217 +39,116 @@ from memharness import MemoryHarness
 from memharness.tools import get_memory_tools
 from langchain.agents import create_agent
 
+
 async def main():
-    # Initialize memory harness
-    harness = MemoryHarness("sqlite:///memory.db")
+    # Initialize memory
+    harness = MemoryHarness("sqlite:///agent_memory.db")
     await harness.connect()
 
-    # Get memory tools (7 tools)
-    tools = get_memory_tools(harness)
-
-    # Create agent with Anthropic model
+    # Create your agent with memory read tools
     agent = create_agent(
         model="anthropic:claude-sonnet-4-6",
-        tools=tools,
+        tools=get_memory_tools(harness),  # 7 tools for memory self-awareness
+        system_prompt="You are a helpful assistant with persistent memory.",
     )
 
-    # Run the agent
-    response = await agent.ainvoke({
-        "messages": [{"role": "user", "content": "Store a fact: Python was created by Guido van Rossum"}]
+    result = await agent.ainvoke({
+        "messages": [{"role": "user", "content": "My name is Alice, I work at SAP"}]
     })
-
-    print(response)
+    print(result["messages"][-1].content)
 
     await harness.disconnect()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+asyncio.run(main())
 ```
 
 ## Conversation Persistence Middleware
 
-To persist conversation history across agent invocations, use the `MemharnessConversationMiddleware`. This middleware:
-
-- **Before model call**: Loads past messages from `harness.get_conversational()` and injects them into `state[messages]`
-- **After model call**: Saves new messages from `state[messages]` to `harness.add_conversational()`
-
-### Complete Middleware Implementation
+This middleware saves every conversation turn to memharness, and loads past messages on each new turn:
 
 ```python
-"""
-Conversation persistence middleware for LangChain agents.
-
-This middleware automatically loads and saves conversation history
-to/from memharness, enabling stateful multi-turn conversations.
-"""
-from typing import Any
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from memharness import MemoryHarness
 
 
 class MemharnessConversationMiddleware(AgentMiddleware):
-    """
-    Middleware for persisting conversation history with memharness.
+    """Persist conversation history to/from memharness.
 
-    Usage:
-        harness = MemoryHarness("sqlite:///memory.db")
-        await harness.connect()
-
-        middleware = MemharnessConversationMiddleware(harness, thread_id="user-123")
-
-        agent = create_agent(
-            model="anthropic:claude-sonnet-4-6",
-            tools=get_memory_tools(harness),
-            middleware=[middleware],
-        )
+    BEFORE model call: load past messages from conv table → inject into state
+    AFTER model call: save new messages to conv table
     """
 
     def __init__(self, harness: MemoryHarness, thread_id: str):
-        """
-        Initialize the middleware.
-
-        Args:
-            harness: The MemoryHarness instance to use for persistence.
-            thread_id: Conversation thread ID to load/save messages under.
-        """
         super().__init__()
         self.harness = harness
         self.thread_id = thread_id
+        self._loaded_count = 0
 
-    async def abefore_model(self, state: dict[str, Any]) -> dict[str, Any]:
-        """
-        Load past conversation messages before the model runs.
+    async def abefore_model(self, state, runtime):
+        """Load past conversation from memharness into agent state."""
+        memories = await self.harness.get_conversational(self.thread_id, limit=50)
+        if not memories:
+            return None
 
-        Args:
-            state: The current agent state containing 'messages'.
+        # Convert MemoryUnits to LangChain messages
+        past_messages = []
+        for m in memories:
+            role = m.metadata.get("role", "user")
+            if role in ("user", "human"):
+                past_messages.append(HumanMessage(content=m.content))
+            elif role in ("assistant", "ai"):
+                past_messages.append(AIMessage(content=m.content))
 
-        Returns:
-            Updated state with historical messages prepended.
-        """
-        # Load past messages from memharness
-        past_messages = await self.harness.get_conversational(self.thread_id, limit=50)
+        current = list(state.get("messages", []))
+        self._loaded_count = len(current)
+        return {"messages": past_messages + current}
 
-        if not past_messages:
-            return state
-
-        # Convert MemoryUnit objects to LangChain message objects
-        langchain_messages = []
-        for msg in past_messages:
-            role = msg.metadata.get("role", "user")
-            content = msg.content
-
-            if role == "user":
-                langchain_messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                langchain_messages.append(AIMessage(content=content))
-            elif role == "system":
-                langchain_messages.append(SystemMessage(content=content))
-
-        # Prepend historical messages to current state
-        state["messages"] = langchain_messages + state.get("messages", [])
-
-        return state
-
-    async def aafter_model(self, state: dict[str, Any]) -> dict[str, Any]:
-        """
-        Save new messages to memharness after the model runs.
-
-        Args:
-            state: The agent state containing new 'messages'.
-
-        Returns:
-            Unmodified state (persistence is a side effect).
-        """
+    async def aafter_model(self, state, runtime):
+        """Save new messages to memharness after model response."""
         messages = state.get("messages", [])
+        new_messages = messages[self._loaded_count:]
 
-        # Save only new messages (skip already-persisted historical messages)
-        # In practice, you'd track which messages are new vs. loaded from history
-        # For simplicity, this example saves all messages in the current turn
-
-        for msg in messages:
-            # Determine role
+        for msg in new_messages:
             if isinstance(msg, HumanMessage):
-                role = "user"
-            elif isinstance(msg, AIMessage):
-                role = "assistant"
-            elif isinstance(msg, SystemMessage):
-                role = "system"
-            else:
-                continue  # Skip unknown message types
+                await self.harness.add_conversational(
+                    self.thread_id, "user", msg.content
+                )
+            elif isinstance(msg, AIMessage) and msg.content:
+                await self.harness.add_conversational(
+                    self.thread_id, "assistant", msg.content
+                )
 
-            # Save to memharness
-            await self.harness.add_conversational(
-                thread_id=self.thread_id,
-                role=role,
-                content=msg.content,
-            )
-
-        return state
-```
-
-### Using the Middleware
-
-```python
-import asyncio
-from memharness import MemoryHarness
-from memharness.tools import get_memory_tools
-from langchain.agents import create_agent
-
-# Include the MemharnessConversationMiddleware class from above
-
-async def main():
-    # Initialize memory harness
-    harness = MemoryHarness("sqlite:///memory.db")
-    await harness.connect()
-
-    # Create middleware
-    middleware = MemharnessConversationMiddleware(harness, thread_id="user-123")
-
-    # Create agent with middleware
-    agent = create_agent(
-        model="anthropic:claude-sonnet-4-6",
-        tools=get_memory_tools(harness),
-        middleware=[middleware],
-    )
-
-    # First turn
-    response1 = await agent.ainvoke({
-        "messages": [{"role": "user", "content": "My name is Alice"}]
-    })
-    print("Turn 1:", response1)
-
-    # Second turn - agent will remember "Alice" from previous turn
-    response2 = await agent.ainvoke({
-        "messages": [{"role": "user", "content": "What's my name?"}]
-    })
-    print("Turn 2:", response2)
-
-    await harness.disconnect()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        self._loaded_count = len(messages)
+        return None
 ```
 
 ## Context Assembly Middleware
 
-The conversation middleware only handles chat messages. For **full memory context** (knowledge base, entities, workflows, persona) injected before every model call, use this middleware:
+This middleware injects full memory context (knowledge base, entities, workflows, persona) as a SystemMessage before each model call:
 
 ```python
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import SystemMessage
-from memharness import MemoryHarness
 from memharness.agents import ContextAssemblyAgent
 
 
 class MemharnessContextMiddleware(AgentMiddleware):
-    """Injects full memory context (KB, entities, workflows, persona) before each model call.
+    """Inject full memory context before each model call.
 
-    Uses ContextAssemblyAgent to assemble relevant memories and injects them
-    as a SystemMessage at the start of the message list.
+    Uses ContextAssemblyAgent to load:
+    - Persona (agent identity)
+    - Knowledge base (relevant facts)
+    - Entities (people, places, systems)
+    - Workflows (reusable patterns)
+    - Summaries (compressed older conversations)
     """
 
-    def __init__(self, harness: MemoryHarness, thread_id: str, max_tokens: int = 4000):
+    def __init__(
+        self,
+        harness: MemoryHarness,
+        thread_id: str,
+        max_tokens: int = 4000,
+    ):
         super().__init__()
         self.harness = harness
         self.thread_id = thread_id
@@ -240,13 +160,10 @@ class MemharnessContextMiddleware(AgentMiddleware):
         if not messages:
             return None
 
-        # Get the latest user query
+        # Find the latest user message as query
         query = ""
         for msg in reversed(messages):
-            if hasattr(msg, "type") and msg.type == "human":
-                query = msg.content
-                break
-            elif hasattr(msg, "content"):
+            if isinstance(msg, HumanMessage):
                 query = msg.content
                 break
 
@@ -257,7 +174,7 @@ class MemharnessContextMiddleware(AgentMiddleware):
         ctx = await self._ctx_agent.assemble(
             query=query,
             thread_id=self.thread_id,
-            include_tools=False,  # tools are already provided via tools=[]
+            include_tools=False,
         )
 
         # Build context sections
@@ -274,379 +191,173 @@ class MemharnessContextMiddleware(AgentMiddleware):
         if not sections:
             return None
 
-        # Inject as SystemMessage at the start
         context_msg = SystemMessage(content="\n\n".join(sections))
         return {"messages": [context_msg] + list(messages)}
 ```
 
-### Using Both Middlewares Together
+## Entity Extraction Middleware
+
+This middleware automatically extracts entities from the agent's response and stores them:
 
 ```python
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-6",
-    tools=get_memory_tools(harness),
-    middleware=[
-        # 1. Inject full memory context (KB, entities, workflows, persona)
-        MemharnessContextMiddleware(harness, thread_id="user-123", max_tokens=3000),
-        # 2. Persist conversation messages across sessions
-        MemharnessConversationMiddleware(harness, thread_id="user-123"),
-    ],
-)
-
-# Agent now has:
-# - Full memory context injected before every LLM call (middleware 1)
-# - Conversation history persisted across sessions (middleware 2)
-# - 7 self-awareness tools for searching/writing memory (tools)
-```
-
-### What Gets Injected
-
-```mermaid
-graph TD
-    U["👤 User message"] --> CM["MemharnessContextMiddleware"]
-    CM --> |"Reads from memory"| KB["📚 Knowledge Base"]
-    CM --> |"Reads from memory"| EN["👤 Entities"]
-    CM --> |"Reads from memory"| WF["⚙️ Workflows"]
-    CM --> |"Reads from memory"| PE["🎭 Persona"]
-    CM --> SM["SystemMessage with context sections"]
-    SM --> CV["MemharnessConversationMiddleware"]
-    CV --> |"Loads past messages"| CONV["💬 Conversation History"]
-    CV --> LLM["🤖 LLM sees: SystemMessage + past messages + current message"]
-    LLM --> |"Response"| CV2["Save assistant response"]
-```
-
-## Complete Working Example
-
-Here's a full end-to-end script you can save as `example.py` and run:
-
-```python
-"""
-Complete LangChain + memharness example with conversation persistence.
-
-This script demonstrates:
-1. Memory tools (7 tools: search, read, write, toolbox_search, expand_summary,
-   assemble_context, summarize_conversation)
-2. Conversation persistence middleware
-3. Multi-turn conversation with memory
-
-Run with: python example.py
-"""
-import asyncio
-from typing import Any
-
-from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-from memharness import MemoryHarness
-from memharness.tools import get_memory_tools
+from memharness.agents import EntityExtractorAgent
 
 
-class MemharnessConversationMiddleware(AgentMiddleware):
-    """Middleware for persisting conversation history with memharness."""
+class MemharnessEntityMiddleware(AgentMiddleware):
+    """Extract and store entities after each model response."""
 
-    def __init__(self, harness: MemoryHarness, thread_id: str):
+    def __init__(self, harness: MemoryHarness):
         super().__init__()
         self.harness = harness
-        self.thread_id = thread_id
+        self._extractor = EntityExtractorAgent(harness)
 
-    async def abefore_model(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Load past conversation messages before the model runs."""
-        past_messages = await self.harness.get_conversational(self.thread_id, limit=50)
-
-        if not past_messages:
-            return state
-
-        # Convert MemoryUnit objects to LangChain message objects
-        langchain_messages = []
-        for msg in past_messages:
-            role = msg.metadata.get("role", "user")
-            content = msg.content
-
-            if role == "user":
-                langchain_messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                langchain_messages.append(AIMessage(content=content))
-            elif role == "system":
-                langchain_messages.append(SystemMessage(content=content))
-
-        # Prepend historical messages to current state
-        state["messages"] = langchain_messages + state.get("messages", [])
-
-        return state
-
-    async def aafter_model(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Save new messages to memharness after the model runs."""
+    async def aafter_model(self, state, runtime):
+        """Extract entities from the latest AI response."""
         messages = state.get("messages", [])
+        if not messages:
+            return None
 
-        for msg in messages:
-            # Determine role
-            if isinstance(msg, HumanMessage):
-                role = "user"
-            elif isinstance(msg, AIMessage):
-                role = "assistant"
-            elif isinstance(msg, SystemMessage):
-                role = "system"
-            else:
-                continue  # Skip unknown message types
+        last_msg = messages[-1]
+        if not isinstance(last_msg, AIMessage) or not last_msg.content:
+            return None
 
-            # Save to memharness
-            await self.harness.add_conversational(
-                thread_id=self.thread_id,
-                role=role,
-                content=msg.content,
-            )
+        # Extract entities using regex (fast, no LLM needed)
+        entities = await self._extractor.extract_entities(last_msg.content)
+        for category, names in entities.items():
+            for name in names:
+                await self.harness.add_entity(
+                    name=name,
+                    entity_type=category,
+                    description=f"{category}: {name}",
+                )
 
-        return state
+        return None
+```
+
+## Putting It All Together
+
+```python
+import asyncio
+from memharness import MemoryHarness
+from memharness.tools import get_memory_tools
+from langchain.agents import create_agent
+# Import middleware classes from above
 
 
 async def main():
-    """Run the complete example."""
-    print("=== memharness + LangChain Complete Example ===\n")
-
-    # Initialize memory harness
-    harness = MemoryHarness("sqlite:///memory.db")
+    # 1. Initialize memory
+    harness = MemoryHarness("sqlite:///agent_memory.db")
     await harness.connect()
-    print("✓ Connected to memory harness\n")
 
-    # Create middleware for conversation persistence
-    middleware = MemharnessConversationMiddleware(harness, thread_id="demo-user")
+    # 2. Pre-load some knowledge
+    await harness.add_knowledge(
+        "Deployments require approval from the platform team",
+        source="runbook",
+    )
+    await harness.add_knowledge(
+        "Use kubectl apply -f deployment.yaml for Kubernetes deploys",
+        source="wiki",
+    )
 
-    # Get memory tools (7 tools)
-    tools = get_memory_tools(harness)
-    print(f"✓ Loaded {len(tools)} memory tools:")
-    for tool in tools:
-        print(f"  - {tool.name}")
-    print()
+    # 3. Create agent with read tools + all middleware
+    thread_id = "user-alice-001"
 
-    # Create agent with middleware
     agent = create_agent(
         model="anthropic:claude-sonnet-4-6",
-        tools=tools,
-        middleware=[middleware],
+        tools=get_memory_tools(harness),
+        middleware=[
+            # Inject full memory context (KB, entities, workflows, persona)
+            MemharnessContextMiddleware(harness, thread_id=thread_id),
+            # Persist conversation across sessions
+            MemharnessConversationMiddleware(harness, thread_id=thread_id),
+            # Extract entities from responses
+            MemharnessEntityMiddleware(harness),
+        ],
+        system_prompt=(
+            "You are a helpful DevOps assistant with persistent memory.\n"
+            "Search your memory before answering questions.\n"
+            "Your memory context is provided in the system message."
+        ),
     )
-    print("✓ Created agent with memory tools and conversation middleware\n")
 
-    # Turn 1: Store knowledge
-    print("--- Turn 1: Store Knowledge ---")
-    response1 = await agent.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Use memory_write to store this fact: Python was created by Guido van Rossum in 1991.",
-                }
-            ]
-        }
-    )
-    print(f"Agent: {response1['messages'][-1].content}\n")
+    # 4. First conversation
+    print("--- Turn 1 ---")
+    r1 = await agent.ainvoke({
+        "messages": [{"role": "user", "content": "How do I deploy to production?"}]
+    })
+    print(r1["messages"][-1].content)
 
-    # Turn 2: Recall knowledge
-    print("--- Turn 2: Recall Knowledge ---")
-    response2 = await agent.ainvoke(
-        {"messages": [{"role": "user", "content": "Who created Python? Use memory_search to find out."}]}
-    )
-    print(f"Agent: {response2['messages'][-1].content}\n")
+    # 5. Second conversation (memory persists!)
+    print("\n--- Turn 2 ---")
+    r2 = await agent.ainvoke({
+        "messages": [{"role": "user", "content": "What did I just ask about?"}]
+    })
+    print(r2["messages"][-1].content)
 
-    # Turn 3: Check conversation history
-    print("--- Turn 3: Check Conversation History ---")
-    past_messages = await harness.get_conversational("demo-user", limit=10)
-    print(f"✓ Found {len(past_messages)} messages in conversation history:")
-    for msg in past_messages:
-        role = msg.metadata.get("role", "unknown")
-        content_preview = msg.content[:60] + "..." if len(msg.content) > 60 else msg.content
-        print(f"  [{role}] {content_preview}")
-    print()
-
-    # Cleanup
-    await harness.disconnect()
-    print("✓ Disconnected from memory harness")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## 7 Memory Tools Reference
-
-| Tool Name | Description |
-|-----------|-------------|
-| `memory_search` | Search across all memory types using semantic similarity |
-| `memory_read` | Read a specific memory by its unique ID |
-| `memory_write` | Write to ANY memory type: knowledge, entity, workflow, tool_log, conversational, etc. |
-| `toolbox_search` | Discover available tools (combines tree view + grep search) |
-| `expand_summary` | Expand a compacted summary back to its original content |
-| `assemble_context` | Assemble full BEFORE-loop context (persona, history, knowledge, entities, workflows, tools) |
-| `summarize_conversation` | Compress conversation history into a summary (preserves originals) |
-
-### memory_write: Universal Write Tool
-
-The `memory_write` tool supports ALL memory types through conditional fields:
-
-```python
-# Knowledge base
-await tool.ainvoke({
-    "memory_type": "knowledge",
-    "content": "Python is a high-level programming language",
-})
-
-# Entity
-await tool.ainvoke({
-    "memory_type": "entity",
-    "content": "Chief Technology Officer at Example Corp",
-    "metadata": {"name": "Alice Smith", "entity_type": "person"},
-})
-
-# Workflow
-await tool.ainvoke({
-    "memory_type": "workflow",
-    "task": "Deploy application to production",
-    "steps": ["Run tests", "Build Docker image", "Push to registry", "Update k8s"],
-    "outcome": "Deployed successfully",
-})
-
-# Tool log
-await tool.ainvoke({
-    "memory_type": "tool_log",
-    "thread_id": "user-123",
-    "tool_name": "github/create_issue",
-    "tool_input": '{"title": "Bug fix", "body": "Fixed the bug"}',
-    "tool_output": "Issue #42 created",
-    "status": "success",
-})
-
-# Conversational
-await tool.ainvoke({
-    "memory_type": "conversational",
-    "thread_id": "user-123",
-    "role": "user",
-    "content": "Hello, how are you?",
-})
-```
-
-## Next Steps
-
-- Explore [Memory Types](./concepts/memory-types) to understand what data each type stores
-- Read [Context Assembly](./agents/context-assembler) to learn how `assemble_context` works
-- Check [Embedded Agents](./agents/overview) for summarization and consolidation patterns
-
-## Fast Path / Slow Path Architecture
-
-memharness supports a **fast path / slow path** architecture for production agent systems:
-
-- **Fast Path** (user-facing, low latency): Save message → assemble context → return. No extraction, no summarization in the hot path.
-- **Slow Path** (background workers, async): Entity extraction, summarization, consolidation, garbage collection.
-
-This separation ensures your user-facing agent is always fast, while background workers enrich memory asynchronously.
-
-### Fast Path Example
-
-```python
-"""Fast path: user-facing agent interactions."""
-import asyncio
-from memharness import MemoryHarness
-from memharness.core.fast_path import FastPath
-
-async def main():
-    # Initialize memory harness
-    harness = MemoryHarness('sqlite:///memory.db')
-    await harness.connect()
-
-    # Fast path: user-facing
-    fast = FastPath(harness)
-
-    # User sends message
-    ctx = await fast.process_user_message('thread-1', 'How do I deploy?')
-    messages = ctx.to_messages()  # feed to LLM
-
-    # Your LLM responds (using langchain, openai, anthropic, etc.)
-    # Example with LangChain:
-    # from langchain.chat_models import init_chat_model
-    # llm = init_chat_model("anthropic:claude-sonnet-4-6")
-    # response = await llm.ainvoke(messages)
-    response = "Deploy using docker compose up -d..."
-
-    # Save assistant response
-    await fast.process_assistant_response('thread-1', response)
+    # 6. Check what's in memory
+    entities = await harness.search_entity("deploy", k=5)
+    print(f"\nEntities extracted: {len(entities)}")
+    for e in entities:
+        print(f"  - {e.metadata.get('entity_name', '?')}: {e.content}")
 
     await harness.disconnect()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+asyncio.run(main())
 ```
 
-### Slow Path Example
+## LangGraph Workflow (Alternative)
+
+For more control, use the built-in LangGraph workflow that handles the full BEFORE → INSIDE → AFTER cycle:
 
 ```python
-"""Slow path: run periodically (cron, background task, etc.)"""
-import asyncio
-from memharness import MemoryHarness
-from memharness.core.slow_path import SlowPath
+from memharness.agents.agent_workflow import create_memory_agent
 
-async def main():
-    # Initialize memory harness
-    harness = MemoryHarness('sqlite:///memory.db')
-    await harness.connect()
-
-    # Slow path: background workers
-    slow = SlowPath(harness)
-
-    # Run all background workers
-    results = await slow.run_all()
-
-    # Print results
-    for r in results:
-        print(f'{r.worker}: processed={r.processed}, errors={r.errors}, '
-              f'duration={r.duration_ms:.1f}ms')
-
-    await harness.disconnect()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### What Each Path Does
-
-**Fast Path** (deterministic, low latency):
-1. `process_user_message()` → save user message to conv table + assemble context
-2. `process_assistant_response()` → save assistant response to conv table
-3. That's it. No extraction, no summarization in the hot path.
-
-**Slow Path** (background workers, async):
-1. **Entity Extraction**: Scan new conv messages → extract entities → upsert (update existing, don't duplicate)
-2. **Summarization**: When thread gets long → compress older messages
-3. **Consolidation**: Scan entity table → merge duplicates
-4. **Garbage Collection**: Archive/delete old data
-
-### With LLMs (optional)
-
-You can optionally provide LLMs to the slow path for better entity extraction and summarization:
-
-```python
-from langchain.chat_models import init_chat_model
-from memharness.core.slow_path import SlowPath
-
-llm = init_chat_model("anthropic:claude-sonnet-4-6")
-
-# Pass LLMs to slow path workers
-slow = SlowPath(
-    harness,
-    entity_extractor_llm=llm,
-    summarizer_llm=llm,
+graph = create_memory_agent(
+    harness=harness,
+    llm="anthropic:claude-sonnet-4-6",
+    tools=[my_web_search],  # your custom tools
 )
 
-results = await slow.run_all()
+result = await graph.ainvoke({
+    "messages": [],
+    "thread_id": "user-1",
+    "query": "How do I deploy?",
+})
+print(result["final_answer"])
 ```
 
-Without LLMs, the slow path uses heuristic-based extraction and summarization (good for testing, lower cost).
+The graph handles: save user msg → assemble context → check size → summarize if needed → call LLM → save response → extract entities → save workflow.
 
-### Context Assembly Prefers Recent Entities
+## What Each Middleware Does
 
-The context assembly agent (used by fast path) automatically prefers recent entities based on `updated_at` timestamp. This solves the "staleness problem":
+| Middleware | When | What |
+|-----------|------|------|
+| **MemharnessContextMiddleware** | BEFORE model | Loads KB, entities, workflows, persona → injects as SystemMessage |
+| **MemharnessConversationMiddleware** | BEFORE + AFTER | Loads past messages → injects. Saves new messages after response |
+| **MemharnessEntityMiddleware** | AFTER model | Extracts entities from response → stores in entity table |
 
-- If user says "I work at SAP" (today)
-- And historical data says "I work at Google" (last year)
-- The entity extractor (slow path) UPSERTs the entity, updating `updated_at`
-- Context assembly (fast path) returns "works at SAP" (most recent)
+## The 7 Memory Tools
 
-This happens automatically — no extra code needed.
+These tools let the agent explore and manage its own memory INSIDE the loop:
+
+| Tool | Type | What it does |
+|------|------|-------------|
+| `memory_search` | Read | Search across all memory types |
+| `memory_read` | Read | Read a specific memory by ID |
+| `memory_write` | Write | Write to any memory type |
+| `expand_summary` | Read | Expand compacted summary to full content |
+| `summarize_conversation` | Write | Compress a conversation thread |
+| `assemble_context` | Read | Full context assembly |
+| `toolbox_search` | Read | Discover available tools |
+
+## Summarization
+
+After summarization, the conversation middleware loads **summary + recent messages only**:
+
+```
+Before: [msg1, msg2, ... msg50]           ← all 50 messages
+After:  [Summary of msg1-40] + [msg41-50] ← compact!
+```
+
+The agent can call `expand_summary` tool if it needs the full detail back.
