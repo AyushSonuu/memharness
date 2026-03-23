@@ -43,6 +43,9 @@ __all__ = [
     "ExpandSummaryTool",
     "ConversationHistoryTool",
     "AssembleContextTool",
+    "SummarizeAndStoreTool",
+    "WriteToolLogTool",
+    "WriteWorkflowTool",
     "get_memory_tools",
     "LANGCHAIN_AVAILABLE",
 ]
@@ -117,6 +120,30 @@ class AssembleContextInput(BaseModel):
     query: str = Field(description="Query to assemble context for")
     thread_id: str = Field(description="Conversation thread ID")
     max_tokens: int = Field(default=4000, description="Maximum tokens in assembled context")
+
+
+class SummarizeAndStoreInput(BaseModel):
+    """Input schema for summarize and store."""
+
+    thread_id: str = Field(description="Thread to summarize")
+    max_messages: int = Field(default=50, description="Max messages to include")
+
+
+class WriteToolLogInput(BaseModel):
+    """Input schema for write tool log."""
+
+    tool_name: str = Field(description="Name of the tool that was executed")
+    tool_input: str = Field(description="Input/arguments passed to the tool")
+    tool_output: str = Field(description="Output/result from the tool")
+    status: str = Field(default="success", description="Execution status: success, error, timeout")
+
+
+class WriteWorkflowInput(BaseModel):
+    """Input schema for write workflow."""
+
+    task: str = Field(description="Description of the task completed")
+    steps: list[str] = Field(description="List of steps taken to complete the task")
+    outcome: str = Field(description="Result: success or failure with description")
 
 
 # =============================================================================
@@ -588,6 +615,228 @@ class AssembleContextTool(BaseTool):
         return context
 
 
+class SummarizeAndStoreTool(BaseTool):
+    """
+    Summarize a conversation thread and store the summary.
+
+    This tool allows agents to compress long conversation histories by
+    creating a summary and storing it. Original messages are preserved
+    in the database (compaction pattern).
+    """
+
+    name: str = "summarize_and_store"
+    description: str = (
+        "Summarize a conversation thread and store the summary. "
+        "Use when conversation history is getting long and you want to compress it. "
+        "Original messages are preserved in the database (compaction pattern)."
+    )
+    args_schema: type[BaseModel] = SummarizeAndStoreInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(self, thread_id: str, max_messages: int = 50) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(self, thread_id: str, max_messages: int = 50) -> str:
+        """
+        Execute summarize and store.
+
+        Args:
+            thread_id: Thread to summarize.
+            max_messages: Max messages to include.
+
+        Returns:
+            Summary text and summary ID.
+        """
+        try:
+            from memharness.agents.summarizer import SummarizerAgent
+
+            # Get messages to summarize
+            messages = await self.harness.get_conversational(thread_id, limit=max_messages)
+            if not messages:
+                return f"No messages found in thread {thread_id}"
+
+            # Create summarizer agent (heuristic mode, no LLM required)
+            summarizer = SummarizerAgent(self.harness, llm=None)
+            summary_text = await summarizer.summarize_thread(thread_id, max_messages)
+
+            # Store summary with source message IDs
+            source_ids = [msg.id for msg in messages]
+            summary_id = await self.harness.add_summary(
+                summary=summary_text, source_ids=source_ids, thread_id=thread_id
+            )
+
+            return (
+                f"Summary created and stored.\n"
+                f"Summary ID: {summary_id}\n"
+                f"Summarized {len(messages)} message(s).\n\n"
+                f"Summary: {summary_text}"
+            )
+        except Exception as e:
+            return f"Error creating summary: {e}"
+
+
+class WriteToolLogTool(BaseTool):
+    """
+    Log a tool execution for audit trail.
+
+    This tool allows agents to record what tool was called, with what
+    input, and what it returned. Use after every tool call to maintain
+    execution history.
+    """
+
+    name: str = "write_tool_log"
+    description: str = (
+        "Log a tool execution for audit trail. "
+        "Records what tool was called, with what input, and what it returned. "
+        "Use after every tool call to maintain execution history."
+    )
+    args_schema: type[BaseModel] = WriteToolLogInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(
+        self,
+        tool_name: str,
+        tool_input: str,
+        tool_output: str,
+        status: str = "success",
+    ) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(
+        self,
+        tool_name: str,
+        tool_input: str,
+        tool_output: str,
+        status: str = "success",
+    ) -> str:
+        """
+        Execute tool log write.
+
+        Args:
+            tool_name: Name of the tool that was executed.
+            tool_input: Input/arguments passed to the tool.
+            tool_output: Output/result from the tool.
+            status: Execution status.
+
+        Returns:
+            Confirmation with log ID.
+        """
+        try:
+            import json
+
+            # Parse tool_input if it's a JSON string
+            try:
+                args_dict = json.loads(tool_input) if isinstance(tool_input, str) else tool_input
+            except (json.JSONDecodeError, TypeError):
+                args_dict = {"input": tool_input}
+
+            # Use a default thread_id if not available in context
+            thread_id = "default"
+
+            # Log the tool execution
+            log_id = await self.harness.add_tool_log(
+                thread_id=thread_id,
+                tool_name=tool_name,
+                args=args_dict,
+                result=tool_output,
+                status=status,
+            )
+
+            return f"Tool execution logged. Log ID: {log_id}\nTool: {tool_name}\nStatus: {status}"
+        except Exception as e:
+            return f"Error logging tool execution: {e}"
+
+
+class WriteWorkflowTool(BaseTool):
+    """
+    Save a completed task as a reusable workflow pattern.
+
+    This tool allows agents to record the steps taken and outcome so
+    similar tasks can follow this recipe. Use after successfully
+    completing a multi-step task.
+    """
+
+    name: str = "write_workflow"
+    description: str = (
+        "Save a completed task as a reusable workflow pattern. "
+        "Records the steps taken and outcome so similar tasks can follow this recipe. "
+        "Use after successfully completing a multi-step task."
+    )
+    args_schema: type[BaseModel] = WriteWorkflowInput
+    harness: Any  # MemoryHarness instance
+
+    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
+        """Initialize the tool with a memory harness."""
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "langchain-core is required for memory tools. "
+                "Install with: pip install langchain-core"
+            )
+        super().__init__(harness=harness, **kwargs)
+
+    def _run(
+        self,
+        task: str,
+        steps: list[str],
+        outcome: str,
+    ) -> str:
+        """Sync execution (not supported for async harness)."""
+        raise NotImplementedError("Use async version (_arun) instead")
+
+    async def _arun(
+        self,
+        task: str,
+        steps: list[str],
+        outcome: str,
+    ) -> str:
+        """
+        Execute workflow write.
+
+        Args:
+            task: Description of the task completed.
+            steps: List of steps taken to complete the task.
+            outcome: Result (success or failure with description).
+
+        Returns:
+            Confirmation with workflow ID.
+        """
+        try:
+            # Store the workflow
+            workflow_id = await self.harness.add_workflow(task=task, steps=steps, outcome=outcome)
+
+            steps_text = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(steps))
+
+            return (
+                f"Workflow saved as reusable pattern.\n"
+                f"Workflow ID: {workflow_id}\n\n"
+                f"Task: {task}\n"
+                f"Steps:\n{steps_text}\n"
+                f"Outcome: {outcome}"
+            )
+        except Exception as e:
+            return f"Error saving workflow: {e}"
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -604,7 +853,7 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         harness: The MemoryHarness instance to create tools for.
 
     Returns:
-        List of BaseTool instances (9 tools total):
+        List of BaseTool instances (12 tools total):
         1. MemorySearchTool - Search across memory types
         2. MemoryReadTool - Read memory by ID
         3. MemoryWriteTool - Write new memory
@@ -614,6 +863,9 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         7. ExpandSummaryTool - Expand compacted summaries
         8. ConversationHistoryTool - Get thread messages
         9. AssembleContextTool - Full context assembly
+        10. SummarizeAndStoreTool - Compress conversation history
+        11. WriteToolLogTool - Log tool executions
+        12. WriteWorkflowTool - Save task as reusable workflow
 
     Raises:
         ImportError: If langchain-core is not installed.
@@ -644,4 +896,7 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         ExpandSummaryTool(harness=harness),
         ConversationHistoryTool(harness=harness),
         AssembleContextTool(harness=harness),
+        SummarizeAndStoreTool(harness=harness),
+        WriteToolLogTool(harness=harness),
+        WriteWorkflowTool(harness=harness),
     ]

@@ -13,12 +13,14 @@ Tools available:
 - memory_read: Read specific memory by ID
 - memory_write: Write new memory
 - memory_stats: Get memory statistics
-- memory_list: List memories by type
 - toolbox_tree: VFS tree view of tools
-- toolbox_ls: List tools in a server
 - toolbox_grep: Search tools by pattern
-- toolbox_cat: Get tool schema
-- summary_expand: Expand a summary to original messages
+- expand_summary: Expand a summary to original messages
+- get_conversation_history: Get conversation history for a thread
+- assemble_context: Assemble all relevant memory context
+- summarize_and_store: Compress conversation history
+- write_tool_log: Log tool executions
+- write_workflow: Save task as reusable workflow
 
 Usage:
     from memharness.tools import get_memory_tools, MemoryToolExecutor
@@ -40,8 +42,11 @@ from memharness.tools.definitions import (
     MemorySearchTool,
     MemoryStatsTool,
     MemoryWriteTool,
+    SummarizeAndStoreTool,
     ToolboxGrepTool,
     ToolboxTreeTool,
+    WriteToolLogTool,
+    WriteWorkflowTool,
     get_memory_tools,
 )
 from memharness.tools.executor import MemoryToolExecutor
@@ -58,5 +63,8 @@ __all__ = [
     "ExpandSummaryTool",
     "ConversationHistoryTool",
     "AssembleContextTool",
+    "SummarizeAndStoreTool",
+    "WriteToolLogTool",
+    "WriteWorkflowTool",
     "LANGCHAIN_AVAILABLE",
 ]
