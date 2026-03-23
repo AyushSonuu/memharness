@@ -23,7 +23,7 @@ class TestRegistryInitialization:
         assert registry2 is not None
 
     def test_all_ten_types_registered(self):
-        """Verify all 10 memory types are registered by default."""
+        """Verify all 9 memory types are registered by default."""
         registry = MemoryTypeRegistry.get_instance()
         registered_types = registry.list_types()
 
@@ -35,7 +35,6 @@ class TestRegistryInitialization:
             MemoryType.TOOLBOX,
             MemoryType.SUMMARY,
             MemoryType.TOOL_LOG,
-            MemoryType.SKILLS,
             MemoryType.FILE,
             MemoryType.PERSONA,
         ]
@@ -46,11 +45,11 @@ class TestRegistryInitialization:
             ], f"MemoryType.{expected.name} not registered"
 
     def test_registered_types_count(self):
-        """Test that exactly 10 types are registered."""
+        """Test that exactly 9 types are registered."""
         registry = MemoryTypeRegistry.get_instance()
         types = registry.list_types()
 
-        assert len(types) >= 10, f"Expected at least 10 types, got {len(types)}"
+        assert len(types) >= 9, f"Expected at least 9 types, got {len(types)}"
 
 
 class TestRegistryGet:
@@ -102,13 +101,6 @@ class TestRegistryGet:
         """Test getting TOOL_LOG type handler."""
         registry = MemoryTypeRegistry.get_instance()
         handler = registry.get(MemoryType.TOOL_LOG)
-
-        assert handler is not None
-
-    def test_get_skills(self):
-        """Test getting SKILLS type handler."""
-        registry = MemoryTypeRegistry.get_instance()
-        handler = registry.get(MemoryType.SKILLS)
 
         assert handler is not None
 
@@ -351,7 +343,7 @@ class TestRegistryMetadata:
         try:
             all_handlers = registry.get_all()
             assert isinstance(all_handlers, dict)
-            assert len(all_handlers) >= 10
+            assert len(all_handlers) >= 9
         except AttributeError:
             # get_all might not be implemented
             # Fallback to iterating through types

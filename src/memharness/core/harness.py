@@ -35,7 +35,6 @@ from memharness.memory_types import (
     GenericMixin,
     KnowledgeMixin,
     PersonaMixin,
-    SkillsMixin,
     SummaryMixin,
     ToolboxMixin,
     ToolLogMixin,
@@ -54,7 +53,6 @@ class MemoryHarness(
     ToolboxMixin,
     SummaryMixin,
     ToolLogMixin,
-    SkillsMixin,
     FileMixin,
     PersonaMixin,
     GenericMixin,
@@ -64,7 +62,7 @@ class MemoryHarness(
     The main entry point for memharness - a framework-agnostic memory layer for AI agents.
 
     MemoryHarness provides a unified interface for storing, retrieving, and searching
-    memories across 10 different memory types. It supports multiple backends (PostgreSQL,
+    memories across 9 different memory types. It supports multiple backends (PostgreSQL,
     SQLite, in-memory) and can be configured for various use cases.
 
     Memory Types:
@@ -75,7 +73,6 @@ class MemoryHarness(
         - Toolbox: Tool definitions with VFS interface
         - Summary: Compressed summaries with expansion
         - Tool Log: Tool execution history
-        - Skills: Learned capabilities
         - File: File metadata and content summaries
         - Persona: User/agent persona blocks
 

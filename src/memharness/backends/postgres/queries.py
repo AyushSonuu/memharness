@@ -81,7 +81,6 @@ class PostgresQueryExecutor:
             "toolbox": MemoryType.TOOLBOX,
             "summary": MemoryType.SUMMARY,
             "tool_log": MemoryType.TOOL_LOG,
-            "skills": MemoryType.SKILLS,
             "file": MemoryType.FILE,
             "persona": MemoryType.PERSONA,
         }
@@ -222,7 +221,6 @@ class PostgresQueryExecutor:
             MemoryType.KNOWLEDGE_BASE: {"source"},
             MemoryType.ENTITY: {"entity_type"},
             MemoryType.TOOLBOX: {"tool_name", "vfs_path"},
-            MemoryType.SKILLS: {"skill_name"},
             MemoryType.FILE: {"source", "file_path", "file_hash"},
             MemoryType.PERSONA: {"persona_name"},
             MemoryType.WORKFLOW: set(),
@@ -271,9 +269,6 @@ class PostgresQueryExecutor:
                     fields["tool_name"] = value["tool_name"]
                 if "vfs_path" in value:
                     fields["vfs_path"] = value["vfs_path"]
-            case MemoryType.SKILLS:
-                if "skill_name" in value:
-                    fields["skill_name"] = value["skill_name"]
             case MemoryType.FILE:
                 if "source" in value:
                     fields["source"] = value["source"]
@@ -379,9 +374,6 @@ class PostgresQueryExecutor:
                     result["tool_name"] = row["tool_name"]
                 if row.get("vfs_path"):
                     result["vfs_path"] = row["vfs_path"]
-            case MemoryType.SKILLS:
-                if row.get("skill_name"):
-                    result["skill_name"] = row["skill_name"]
             case MemoryType.FILE:
                 if row.get("source"):
                     result["source"] = row["source"]
@@ -860,11 +852,6 @@ class PostgresQueryExecutor:
         }:
             clauses.append(f"tool_name = ${param_idx}")
             params.append(filters["tool_name"])
-            param_idx += 1
-
-        if "skill_name" in filters and memory_type == MemoryType.SKILLS:
-            clauses.append(f"skill_name = ${param_idx}")
-            params.append(filters["skill_name"])
             param_idx += 1
 
         if "persona_name" in filters and memory_type == MemoryType.PERSONA:

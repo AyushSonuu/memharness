@@ -70,9 +70,7 @@ class MemoryReadInput(BaseModel):
 class MemoryWriteInput(BaseModel):
     """Input schema for memory write."""
 
-    memory_type: str = Field(
-        description="Type of memory (knowledge_base, entity, workflow, or skills)"
-    )
+    memory_type: str = Field(description="Type of memory (knowledge_base, entity, or workflow)")
     content: str = Field(description="The content to store in memory")
     metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata to attach")
 

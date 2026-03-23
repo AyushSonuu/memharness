@@ -177,14 +177,6 @@ class ToolLogConfig(BaseModel):
     retention_days: int = Field(default=30, ge=1, description="Days to retain tool logs")
 
 
-class SkillsConfig(BaseModel):
-    """Configuration for skills memory type."""
-
-    model_config = ConfigDict(frozen=True)
-
-    auto_version: bool = Field(default=True, description="Automatically version skill updates")
-
-
 class FileMemoryConfig(BaseModel):
     """Configuration for file memory type."""
 
@@ -215,7 +207,6 @@ class MemoryTypesConfig(BaseModel):
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
     toolbox: ToolboxConfig = Field(default_factory=ToolboxConfig)
     tool_log: ToolLogConfig = Field(default_factory=ToolLogConfig)
-    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     file: FileMemoryConfig = Field(default_factory=FileMemoryConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
 
