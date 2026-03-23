@@ -37,15 +37,10 @@ __all__ = [
     "MemorySearchTool",
     "MemoryReadTool",
     "MemoryWriteTool",
-    "MemoryStatsTool",
-    "ToolboxTreeTool",
-    "ToolboxGrepTool",
+    "ToolboxSearchTool",
     "ExpandSummaryTool",
-    "ConversationHistoryTool",
     "AssembleContextTool",
     "SummarizeAndStoreTool",
-    "WriteToolLogTool",
-    "WriteWorkflowTool",
     "get_memory_tools",
     "LANGCHAIN_AVAILABLE",
 ]
@@ -76,42 +71,52 @@ class MemoryReadInput(BaseModel):
 class MemoryWriteInput(BaseModel):
     """Input schema for memory write."""
 
-    memory_type: str = Field(description="Type of memory (knowledge_base, entity, or workflow)")
+    memory_type: str = Field(
+        description="Type of memory: conversational, knowledge, entity, workflow, toolbox, summary, tool_log, persona, file"
+    )
     content: str = Field(description="The content to store in memory")
     metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata to attach")
 
+    # Workflow-specific fields
+    task: str | None = Field(default=None, description="For workflow: task description")
+    steps: list[str] | None = Field(default=None, description="For workflow: list of steps")
+    outcome: str | None = Field(default=None, description="For workflow: outcome description")
 
-class MemoryStatsInput(BaseModel):
-    """Input schema for memory stats (no parameters)."""
+    # Tool log-specific fields
+    tool_name: str | None = Field(default=None, description="For tool_log: name of the tool")
+    tool_input: str | None = Field(default=None, description="For tool_log: tool input/arguments")
+    tool_output: str | None = Field(default=None, description="For tool_log: tool output/result")
+    status: str | None = Field(
+        default=None, description="For tool_log: execution status (success/error/timeout)"
+    )
 
-    pass
+    # Common fields
+    thread_id: str | None = Field(
+        default=None, description="Thread ID for conversational or tool_log"
+    )
+    role: str | None = Field(
+        default=None, description="Role for conversational (user/assistant/system)"
+    )
 
 
-class ToolboxTreeInput(BaseModel):
-    """Input schema for toolbox tree."""
+class ToolboxSearchInput(BaseModel):
+    """Input schema for toolbox search."""
 
-    path: str = Field(default="/", description="Path to start the tree from")
-    depth: int = Field(default=3, description="Maximum depth to display (1-5)")
-
-
-class ToolboxGrepInput(BaseModel):
-    """Input schema for toolbox grep."""
-
-    pattern: str = Field(description="Regex pattern to search for in tool names and descriptions")
-    case_sensitive: bool = Field(default=False, description="Whether the search is case-sensitive")
+    pattern: str | None = Field(
+        default=None,
+        description="Optional regex pattern to search for (grep mode). If not provided, shows tree view.",
+    )
+    case_sensitive: bool = Field(
+        default=False, description="Whether the search is case-sensitive (grep mode only)"
+    )
+    path: str = Field(default="/", description="Path to start from (tree mode only)")
+    depth: int = Field(default=3, description="Maximum depth to display (tree mode only, 1-5)")
 
 
 class ExpandSummaryInput(BaseModel):
     """Input schema for expand summary."""
 
     summary_id: str = Field(description="The ID of the summary to expand back to full content")
-
-
-class ConversationHistoryInput(BaseModel):
-    """Input schema for conversation history."""
-
-    thread_id: str = Field(description="Conversation thread ID")
-    limit: int = Field(default=20, description="Max messages to retrieve")
 
 
 class AssembleContextInput(BaseModel):
@@ -127,23 +132,6 @@ class SummarizeAndStoreInput(BaseModel):
 
     thread_id: str = Field(description="Thread to summarize")
     max_messages: int = Field(default=50, description="Max messages to include")
-
-
-class WriteToolLogInput(BaseModel):
-    """Input schema for write tool log."""
-
-    tool_name: str = Field(description="Name of the tool that was executed")
-    tool_input: str = Field(description="Input/arguments passed to the tool")
-    tool_output: str = Field(description="Output/result from the tool")
-    status: str = Field(default="success", description="Execution status: success, error, timeout")
-
-
-class WriteWorkflowInput(BaseModel):
-    """Input schema for write workflow."""
-
-    task: str = Field(description="Description of the task completed")
-    steps: list[str] = Field(description="List of steps taken to complete the task")
-    outcome: str = Field(description="Result: success or failure with description")
 
 
 # =============================================================================
@@ -264,8 +252,10 @@ class MemoryWriteTool(BaseTool):
 
     name: str = "memory_write"
     description: str = (
-        "Write new information to memory. "
-        "Use this to persist important facts, learnings, or observations."
+        "Write new information to memory. Supports ALL memory types: "
+        "conversational (chat messages), knowledge (facts), entity (named entities), "
+        "workflow (task steps), tool_log (tool execution logs), persona, file, summary, toolbox. "
+        "Use the appropriate fields for your memory type."
     )
     args_schema: type[BaseModel] = MemoryWriteInput
     harness: Any  # MemoryHarness instance
@@ -279,12 +269,7 @@ class MemoryWriteTool(BaseTool):
             )
         super().__init__(harness=harness, **kwargs)
 
-    def _run(
-        self,
-        memory_type: str,
-        content: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
+    def _run(self, **kwargs: Any) -> str:
         """Sync execution (not supported for async harness)."""
         raise NotImplementedError("Use async version (_arun) instead")
 
@@ -293,40 +278,152 @@ class MemoryWriteTool(BaseTool):
         memory_type: str,
         content: str,
         metadata: dict[str, Any] | None = None,
+        task: str | None = None,
+        steps: list[str] | None = None,
+        outcome: str | None = None,
+        tool_name: str | None = None,
+        tool_input: str | None = None,
+        tool_output: str | None = None,
+        status: str | None = None,
+        thread_id: str | None = None,
+        role: str | None = None,
     ) -> str:
         """
-        Execute memory write.
+        Execute memory write for ANY memory type.
 
         Args:
             memory_type: Type of memory to write.
             content: Content to store.
             metadata: Optional metadata.
+            task: For workflow - task description.
+            steps: For workflow - list of steps.
+            outcome: For workflow - outcome description.
+            tool_name: For tool_log - tool name.
+            tool_input: For tool_log - tool input.
+            tool_output: For tool_log - tool output.
+            status: For tool_log - status (success/error/timeout).
+            thread_id: For conversational or tool_log - thread ID.
+            role: For conversational - role (user/assistant/system).
 
         Returns:
             Confirmation with memory ID.
         """
-        from memharness.tools.executor import MemoryToolExecutor
+        try:
+            import json
 
-        executor = MemoryToolExecutor(self.harness)
-        return await executor.execute(
-            "memory_write", memory_type=memory_type, content=content, metadata=metadata
-        )
+            # Normalize memory type names
+            type_map = {
+                "knowledge": "knowledge_base",
+                "knowledge_base": "knowledge_base",
+                "conversational": "conversational",
+                "entity": "entity",
+                "workflow": "workflow",
+                "tool_log": "tool_log",
+                "toolbox": "toolbox",
+                "summary": "summary",
+                "persona": "persona",
+                "file": "file",
+            }
+
+            normalized_type = type_map.get(memory_type.lower())
+            if not normalized_type:
+                return f"Error: Unknown memory type '{memory_type}'. Supported types: {', '.join(type_map.keys())}"
+
+            # Handle workflow type
+            if normalized_type == "workflow":
+                if not task or not steps or not outcome:
+                    return "Error: workflow type requires task, steps, and outcome fields"
+                memory_id = await self.harness.add_workflow(task=task, steps=steps, outcome=outcome)
+                steps_text = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(steps))
+                return (
+                    f"Workflow saved successfully.\n"
+                    f"Memory ID: {memory_id}\n\n"
+                    f"Task: {task}\n"
+                    f"Steps:\n{steps_text}\n"
+                    f"Outcome: {outcome}"
+                )
+
+            # Handle tool_log type
+            elif normalized_type == "tool_log":
+                if not tool_name or not tool_input or not tool_output:
+                    return "Error: tool_log type requires tool_name, tool_input, and tool_output fields"
+
+                # Parse tool_input if it's a JSON string
+                try:
+                    args_dict = (
+                        json.loads(tool_input) if isinstance(tool_input, str) else tool_input
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    args_dict = {"input": tool_input}
+
+                tid = thread_id or "default"
+                memory_id = await self.harness.add_tool_log(
+                    thread_id=tid,
+                    tool_name=tool_name,
+                    args=args_dict,
+                    result=tool_output,
+                    status=status or "success",
+                )
+                return (
+                    f"Tool execution logged successfully.\n"
+                    f"Memory ID: {memory_id}\n"
+                    f"Tool: {tool_name}\n"
+                    f"Status: {status or 'success'}"
+                )
+
+            # Handle conversational type
+            elif normalized_type == "conversational":
+                if not thread_id or not role:
+                    return "Error: conversational type requires thread_id and role fields"
+                memory_id = await self.harness.add_conversational(
+                    thread_id=thread_id, role=role, content=content
+                )
+                return (
+                    f"Conversational memory saved successfully.\n"
+                    f"Memory ID: {memory_id}\n"
+                    f"Thread: {thread_id}\n"
+                    f"Role: {role}"
+                )
+
+            # Handle knowledge_base type
+            elif normalized_type == "knowledge_base":
+                memory_id = await self.harness.add_knowledge(content=content, metadata=metadata)
+                return f"Knowledge saved successfully. Memory ID: {memory_id}"
+
+            # Handle entity type
+            elif normalized_type == "entity":
+                # Extract entity details from metadata or content
+                name = (metadata or {}).get("name", "Unknown")
+                entity_type = (metadata or {}).get("entity_type", "general")
+                memory_id = await self.harness.add_entity(
+                    name=name, entity_type=entity_type, description=content, metadata=metadata
+                )
+                return f"Entity '{name}' saved successfully. Memory ID: {memory_id}"
+
+            # Handle other types generically
+            else:
+                return f"Error: Memory type '{normalized_type}' is supported by the harness but write logic not yet implemented in this tool. Use the harness directly."
+
+        except Exception as e:
+            return f"Error writing to memory: {e}"
 
 
-class MemoryStatsTool(BaseTool):
+class ToolboxSearchTool(BaseTool):
     """
-    Get memory statistics and usage information.
+    Search and explore available tools in your toolbox.
 
-    This tool provides agents with insights into their memory usage,
-    showing counts, sizes, and health metrics for each memory type.
+    This tool combines tree view and grep functionality. If a pattern is provided,
+    it searches for tools matching that pattern (grep mode). If no pattern is given,
+    it shows a tree view of all tools organized by server/category.
     """
 
-    name: str = "memory_stats"
+    name: str = "toolbox_search"
     description: str = (
-        "Get statistics about your memory usage. "
-        "Shows counts, sizes, and health metrics for each memory type."
+        "Search and explore available tools in your toolbox. "
+        "Provide a 'pattern' to search for specific tools (grep mode), "
+        "or leave pattern empty to see a tree view of all tools organized by server/category."
     )
-    args_schema: type[BaseModel] = MemoryStatsInput
+    args_schema: type[BaseModel] = ToolboxSearchInput
     harness: Any  # MemoryHarness instance
 
     def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
@@ -338,115 +435,41 @@ class MemoryStatsTool(BaseTool):
             )
         super().__init__(harness=harness, **kwargs)
 
-    def _run(self) -> str:
+    def _run(self, **kwargs: Any) -> str:
         """Sync execution (not supported for async harness)."""
         raise NotImplementedError("Use async version (_arun) instead")
 
-    async def _arun(self) -> str:
+    async def _arun(
+        self,
+        pattern: str | None = None,
+        case_sensitive: bool = False,
+        path: str = "/",
+        depth: int = 3,
+    ) -> str:
         """
-        Execute memory stats.
-
-        Returns:
-            Formatted statistics overview.
-        """
-        from memharness.tools.executor import MemoryToolExecutor
-
-        executor = MemoryToolExecutor(self.harness)
-        return await executor.execute("memory_stats")
-
-
-class ToolboxTreeTool(BaseTool):
-    """
-    Display a tree view of available tools.
-
-    This tool shows agents a hierarchical view of all available
-    tools in their toolbox, organized by server/category.
-    """
-
-    name: str = "toolbox_tree"
-    description: str = (
-        "Display a tree view of available tools in your toolbox. "
-        "Shows tools organized by server/category in a hierarchical view."
-    )
-    args_schema: type[BaseModel] = ToolboxTreeInput
-    harness: Any  # MemoryHarness instance
-
-    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
-            )
-        super().__init__(harness=harness, **kwargs)
-
-    def _run(self, path: str = "/", depth: int = 3) -> str:
-        """Sync execution (not supported for async harness)."""
-        raise NotImplementedError("Use async version (_arun) instead")
-
-    async def _arun(self, path: str = "/", depth: int = 3) -> str:
-        """
-        Execute toolbox tree.
+        Execute toolbox search.
 
         Args:
-            path: Starting path.
-            depth: Max depth.
+            pattern: Optional regex pattern to search for (grep mode).
+            case_sensitive: Whether the search is case-sensitive.
+            path: Starting path for tree view.
+            depth: Maximum depth for tree view.
 
         Returns:
-            Formatted tree.
+            Formatted tree or search results.
         """
         from memharness.tools.executor import MemoryToolExecutor
 
         executor = MemoryToolExecutor(self.harness)
-        return await executor.execute("toolbox_tree", path=path, depth=depth)
 
-
-class ToolboxGrepTool(BaseTool):
-    """
-    Search for tools by name or description pattern.
-
-    This tool allows agents to search for specific tools when they
-    know part of a tool name or what it does.
-    """
-
-    name: str = "toolbox_grep"
-    description: str = (
-        "Search for tools by name or description pattern. "
-        "Useful when you know part of a tool name or what it does."
-    )
-    args_schema: type[BaseModel] = ToolboxGrepInput
-    harness: Any  # MemoryHarness instance
-
-    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
+        # Grep mode if pattern is provided
+        if pattern:
+            return await executor.execute(
+                "toolbox_grep", pattern=pattern, case_sensitive=case_sensitive
             )
-        super().__init__(harness=harness, **kwargs)
-
-    def _run(self, pattern: str, case_sensitive: bool = False) -> str:
-        """Sync execution (not supported for async harness)."""
-        raise NotImplementedError("Use async version (_arun) instead")
-
-    async def _arun(self, pattern: str, case_sensitive: bool = False) -> str:
-        """
-        Execute toolbox grep.
-
-        Args:
-            pattern: Regex pattern.
-            case_sensitive: Match case.
-
-        Returns:
-            Matching tools.
-        """
-        from memharness.tools.executor import MemoryToolExecutor
-
-        executor = MemoryToolExecutor(self.harness)
-        return await executor.execute(
-            "toolbox_grep", pattern=pattern, case_sensitive=case_sensitive
-        )
+        # Tree mode otherwise
+        else:
+            return await executor.execute("toolbox_tree", path=path, depth=depth)
 
 
 class ExpandSummaryTool(BaseTool):
@@ -504,63 +527,6 @@ class ExpandSummaryTool(BaseTool):
             return "\n".join(lines)
         except KeyError as e:
             return f"Error: {e}"
-
-
-class ConversationHistoryTool(BaseTool):
-    """
-    Get conversation history for a thread.
-
-    This tool allows agents to retrieve messages from a specific conversation
-    thread. Useful for reviewing what was discussed in a thread.
-    """
-
-    name: str = "get_conversation_history"
-    description: str = (
-        "Get conversation history for a thread as a list of messages. "
-        "Returns recent messages from the specified conversation thread."
-    )
-    args_schema: type[BaseModel] = ConversationHistoryInput
-    harness: Any  # MemoryHarness instance
-
-    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
-            )
-        super().__init__(harness=harness, **kwargs)
-
-    def _run(self, thread_id: str, limit: int = 20) -> str:
-        """Sync execution (not supported for async harness)."""
-        raise NotImplementedError("Use async version (_arun) instead")
-
-    async def _arun(self, thread_id: str, limit: int = 20) -> str:
-        """
-        Execute conversation history retrieval.
-
-        Args:
-            thread_id: Conversation thread ID.
-            limit: Max messages to retrieve.
-
-        Returns:
-            Formatted conversation history.
-        """
-        messages = await self.harness.get_conversational(thread_id, limit=limit)
-        if not messages:
-            return f"No conversation history found for thread {thread_id}"
-
-        # Format as conversation messages
-        lines = [f"Conversation history for thread {thread_id} ({len(messages)} messages):\n"]
-        for m in messages:
-            role = m.metadata.get("role", "user")
-            timestamp = m.metadata.get("timestamp", "")
-            if timestamp:
-                lines.append(f"[{timestamp}] {role}: {m.content}")
-            else:
-                lines.append(f"{role}: {m.content}")
-
-        return "\n".join(lines)
 
 
 class AssembleContextTool(BaseTool):
@@ -685,158 +651,6 @@ class SummarizeAndStoreTool(BaseTool):
             return f"Error creating summary: {e}"
 
 
-class WriteToolLogTool(BaseTool):
-    """
-    Log a tool execution for audit trail.
-
-    This tool allows agents to record what tool was called, with what
-    input, and what it returned. Use after every tool call to maintain
-    execution history.
-    """
-
-    name: str = "write_tool_log"
-    description: str = (
-        "Log a tool execution for audit trail. "
-        "Records what tool was called, with what input, and what it returned. "
-        "Use after every tool call to maintain execution history."
-    )
-    args_schema: type[BaseModel] = WriteToolLogInput
-    harness: Any  # MemoryHarness instance
-
-    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
-            )
-        super().__init__(harness=harness, **kwargs)
-
-    def _run(
-        self,
-        tool_name: str,
-        tool_input: str,
-        tool_output: str,
-        status: str = "success",
-    ) -> str:
-        """Sync execution (not supported for async harness)."""
-        raise NotImplementedError("Use async version (_arun) instead")
-
-    async def _arun(
-        self,
-        tool_name: str,
-        tool_input: str,
-        tool_output: str,
-        status: str = "success",
-    ) -> str:
-        """
-        Execute tool log write.
-
-        Args:
-            tool_name: Name of the tool that was executed.
-            tool_input: Input/arguments passed to the tool.
-            tool_output: Output/result from the tool.
-            status: Execution status.
-
-        Returns:
-            Confirmation with log ID.
-        """
-        try:
-            import json
-
-            # Parse tool_input if it's a JSON string
-            try:
-                args_dict = json.loads(tool_input) if isinstance(tool_input, str) else tool_input
-            except (json.JSONDecodeError, TypeError):
-                args_dict = {"input": tool_input}
-
-            # Use a default thread_id if not available in context
-            thread_id = "default"
-
-            # Log the tool execution
-            log_id = await self.harness.add_tool_log(
-                thread_id=thread_id,
-                tool_name=tool_name,
-                args=args_dict,
-                result=tool_output,
-                status=status,
-            )
-
-            return f"Tool execution logged. Log ID: {log_id}\nTool: {tool_name}\nStatus: {status}"
-        except Exception as e:
-            return f"Error logging tool execution: {e}"
-
-
-class WriteWorkflowTool(BaseTool):
-    """
-    Save a completed task as a reusable workflow pattern.
-
-    This tool allows agents to record the steps taken and outcome so
-    similar tasks can follow this recipe. Use after successfully
-    completing a multi-step task.
-    """
-
-    name: str = "write_workflow"
-    description: str = (
-        "Save a completed task as a reusable workflow pattern. "
-        "Records the steps taken and outcome so similar tasks can follow this recipe. "
-        "Use after successfully completing a multi-step task."
-    )
-    args_schema: type[BaseModel] = WriteWorkflowInput
-    harness: Any  # MemoryHarness instance
-
-    def __init__(self, harness: MemoryHarness, **kwargs: Any) -> None:
-        """Initialize the tool with a memory harness."""
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-core is required for memory tools. "
-                "Install with: pip install langchain-core"
-            )
-        super().__init__(harness=harness, **kwargs)
-
-    def _run(
-        self,
-        task: str,
-        steps: list[str],
-        outcome: str,
-    ) -> str:
-        """Sync execution (not supported for async harness)."""
-        raise NotImplementedError("Use async version (_arun) instead")
-
-    async def _arun(
-        self,
-        task: str,
-        steps: list[str],
-        outcome: str,
-    ) -> str:
-        """
-        Execute workflow write.
-
-        Args:
-            task: Description of the task completed.
-            steps: List of steps taken to complete the task.
-            outcome: Result (success or failure with description).
-
-        Returns:
-            Confirmation with workflow ID.
-        """
-        try:
-            # Store the workflow
-            workflow_id = await self.harness.add_workflow(task=task, steps=steps, outcome=outcome)
-
-            steps_text = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(steps))
-
-            return (
-                f"Workflow saved as reusable pattern.\n"
-                f"Workflow ID: {workflow_id}\n\n"
-                f"Task: {task}\n"
-                f"Steps:\n{steps_text}\n"
-                f"Outcome: {outcome}"
-            )
-        except Exception as e:
-            return f"Error saving workflow: {e}"
-
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -853,19 +667,14 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         harness: The MemoryHarness instance to create tools for.
 
     Returns:
-        List of BaseTool instances (12 tools total):
-        1. MemorySearchTool - Search across memory types
-        2. MemoryReadTool - Read memory by ID
-        3. MemoryWriteTool - Write new memory
-        4. MemoryStatsTool - Get memory statistics
-        5. ToolboxTreeTool - Explore tools VFS
-        6. ToolboxGrepTool - Search tools by pattern
-        7. ExpandSummaryTool - Expand compacted summaries
-        8. ConversationHistoryTool - Get thread messages
-        9. AssembleContextTool - Full context assembly
-        10. SummarizeAndStoreTool - Compress conversation history
-        11. WriteToolLogTool - Log tool executions
-        12. WriteWorkflowTool - Save task as reusable workflow
+        List of BaseTool instances (7 tools total):
+        1. memory_search - Search across memory types
+        2. memory_read - Read memory by ID
+        3. memory_write - Write to ANY memory type (knowledge, entity, workflow, tool_log, etc.)
+        4. toolbox_search - Discover tools (tree + grep combined)
+        5. expand_summary - Expand compacted summaries
+        6. assemble_context - Full BEFORE-loop context assembly
+        7. summarize_conversation - Compress conversation history
 
     Raises:
         ImportError: If langchain-core is not installed.
@@ -878,8 +687,8 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         >>> tools = get_memory_tools(harness)
         >>>
         >>> # Use with LangChain agent
-        >>> from langchain.agents import AgentExecutor
-        >>> agent = AgentExecutor(tools=tools, ...)
+        >>> from langchain.agents import create_agent
+        >>> agent = create_agent(model=..., tools=tools, ...)
     """
     if not LANGCHAIN_AVAILABLE:
         raise ImportError(
@@ -890,13 +699,8 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         MemorySearchTool(harness=harness),
         MemoryReadTool(harness=harness),
         MemoryWriteTool(harness=harness),
-        MemoryStatsTool(harness=harness),
-        ToolboxTreeTool(harness=harness),
-        ToolboxGrepTool(harness=harness),
+        ToolboxSearchTool(harness=harness),
         ExpandSummaryTool(harness=harness),
-        ConversationHistoryTool(harness=harness),
         AssembleContextTool(harness=harness),
         SummarizeAndStoreTool(harness=harness),
-        WriteToolLogTool(harness=harness),
-        WriteWorkflowTool(harness=harness),
     ]
