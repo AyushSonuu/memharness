@@ -96,6 +96,8 @@ addopts = "-v --cov=memharness --cov-report=term-missing"
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -106,8 +108,10 @@ select = [
     "UP",  # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long (handled by black)
-    "B008",  # do not perform function calls in argument defaults
+    "E501",   # line too long
+    "B008",   # do not perform function calls in argument defaults
+    "B017",   # do not assert blind exception
+    "UP042",  # prefer StrEnum (keep str, Enum for 3.10 compat docs)
 ]
 
 [tool.mypy]

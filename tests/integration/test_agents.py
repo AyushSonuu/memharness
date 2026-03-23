@@ -348,7 +348,7 @@ class TestMemoryConsolidationAgent:
             await memory.consolidate_memories(similarity_threshold=0.9)
 
             # Similar entries might be merged
-            results = await memory.search_knowledge("Python programming", k=10)
+            await memory.search_knowledge("Python programming", k=10)
             # Exact behavior depends on implementation
         except AttributeError:
             pytest.skip("Memory consolidation not implemented")
@@ -365,7 +365,7 @@ class TestMemoryConsolidationAgent:
             await memory.deduplicate_entities()
 
             # Should merge similar entities
-            results = await memory.search_entity("John")
+            await memory.search_entity("John")
             # Might be consolidated
         except AttributeError:
             pytest.skip("Entity deduplication not implemented")
@@ -578,7 +578,7 @@ class TestAgentIntegration:
             await memory.learn_from_thread("t1")
 
             # Later, similar request should trigger learned behavior
-            skills = await memory.search_skills("deploy staging")
+            await memory.search_skills("deploy staging")
             # Might have learned the pattern
         except AttributeError:
             pytest.skip("Agent learning not implemented")

@@ -161,7 +161,7 @@ class SummarizerAgent(EmbeddedAgent):
         # For now, return empty - actual implementation depends on backend
         try:
             # Query conversational memories to find distinct threads
-            cutoff = datetime.now() - timedelta(hours=self.config.summarizer_max_age_hours)
+            datetime.now() - timedelta(hours=self.config.summarizer_max_age_hours)
             # Would call memory.search() or similar to find threads
             return []
         except Exception:
@@ -341,7 +341,7 @@ Summary:"""
 
     async def _mark_as_summarized(self, memory_ids: list[str]) -> None:
         """Mark memories as having been summarized."""
-        for memory_id in memory_ids:
+        for _memory_id in memory_ids:
             # Would call memory.update() or similar
             # await self.memory.update(
             #     memory_id,

@@ -1064,7 +1064,7 @@ class PostgresBackend:
                 adjusted = adjusted.replace(f"${i}", f"${i + 1}")
             adjusted_clauses.append(adjusted)
 
-        where_sql = f"WHERE {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""
+        f"WHERE {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""
 
         query = f"""
             SELECT *, (embedding <=> $1) AS distance

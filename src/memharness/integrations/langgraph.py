@@ -31,6 +31,7 @@ Install with: pip install memharness[langgraph]
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator, Sequence
 from datetime import UTC, datetime
@@ -229,8 +230,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
                 results.append(item)
             return results
 
-        for item in self._run_async(_list()):
-            yield item
+        yield from self._run_async(_list())
 
     async def alist(
         self,

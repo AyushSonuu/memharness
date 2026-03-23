@@ -293,7 +293,7 @@ class GCAgent(EmbeddedAgent):
         """Find memories old enough to archive."""
         targets: list[GCTarget] = []
         now = datetime.now()
-        archive_threshold = now - timedelta(days=self.config.gc_archive_after_days)
+        now - timedelta(days=self.config.gc_archive_after_days)
 
         # Would query old, non-archived memories
         # memories = await self.memory.search(

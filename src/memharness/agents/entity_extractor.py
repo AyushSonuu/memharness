@@ -434,7 +434,7 @@ Entities:"""
         # Strategy 2: Email patterns (can indicate person/org)
         email_pattern = r"\b([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b"
         for match in re.finditer(email_pattern, text):
-            username = match.group(1)
+            match.group(1)
             domain = match.group(2)
 
             # Extract org from domain

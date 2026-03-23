@@ -1,87 +1,136 @@
-# memharness — Full Implementation Plan
+# memharness v0.1.0 → v0.2.0 Implementation Plan
 
-## Current State (2026-03-23)
-- 116 tests pass, 42 fail (all in registry), 43 skipped
-- GitHub repo: AyushSonuu/memharness (public, main branch)
-- Package name available on PyPI
+## Current State Analysis
 
-## Architecture Decision: Single Source of Truth
+### Codebase Health
+- **168 tests passing**, 0 failing, 33 skipped
+- CI: tests ✅, docs ✅, lint ❌ (ruff warnings)
+- `harness.py` is **2564 lines** — needs splitting
+- Dual `MemoryUnit` definitions (dataclass in harness.py, Pydantic in types.py)
+- Agent modules are stubs (not using LangChain)
+- Integration modules have undefined names (`asyncio` in langgraph.py)
 
-### The Problem
-Two MemoryType enums exist:
-- `types.py` (Pydantic): uses `KNOWLEDGE_BASE = "knowledge_base"` 
-- `harness.py` (dataclass): uses `KNOWLEDGE = "knowledge"`
+### Architecture Problems
+1. **God file**: harness.py contains MemoryType, MemoryUnit, MemharnessConfig, BackendProtocol, InMemoryBackend, backend factory, embedding function, AND the main MemoryHarness class
+2. **Dead code**: types.py Pydantic MemoryUnit is never used by the core
+3. **Agent stubs**: agents/ has skeleton code that doesn't use LangChain
+4. **Integration bugs**: langgraph.py references undefined `asyncio`
 
-Registry imports from types.py. Harness has its own. Tests use harness version.
+---
 
-### The Decision
-**harness.py is the canonical source.** It's what the API uses, what tests reference, what users see.
+## Target Architecture (v0.2.0)
 
-Action: 
-1. Update `types.py` to match harness.py values (KNOWLEDGE not KNOWLEDGE_BASE)
-2. Make registry import from harness.py (not types.py)
-3. types.py becomes supplementary (Pydantic models for SearchResult, SearchFilter, enums like StorageType, TriggerType)
-
-## Phase 1: Fix Registry (42 failing tests)
-
-### Required changes to registry.py:
-1. Add `MemoryTypeRegistry.get_instance()` classmethod (singleton pattern)
-2. Change `register()` to allow replacement (tests call register for existing types)
-3. Add handler interface support (tests check for `handler_for()`, handler has `store/search/format` methods)
-4. Add metadata methods: `get_description()`, `get_schema()`, `get_all_handlers()`
-5. Import MemoryType from harness (not types.py), or unify the enum values
-
-### Test expectations (from test_registry.py):
-```python
-registry = MemoryTypeRegistry.get_instance()  # singleton
-registry.get(MemoryType.KNOWLEDGE)  # not KNOWLEDGE_BASE
-registry.register(config)  # should replace, not raise
-registry.list_types()  # returns list of MemoryType enums (not strings)
-registry.handler_for(MemoryType.KNOWLEDGE)  # returns handler with store/search/format
-registry.unregister(MemoryType.CUSTOM)
+```
+src/memharness/
+├── __init__.py              # Clean public API
+├── _version.py              # Version string
+├── types.py                 # MemoryType, MemoryUnit, SearchResult, SearchFilter (SINGLE SOURCE)
+├── exceptions.py            # All custom exceptions
+├── config/
+│   ├── __init__.py
+│   ├── models.py            # Pydantic config models
+│   └── loader.py            # YAML/env loading
+├── core/
+│   ├── __init__.py
+│   ├── harness.py           # MemoryHarness class (slim: delegates to managers)
+│   ├── embedding.py         # Embedding function registry
+│   ├── context.py           # Context assembly logic
+│   └── namespace.py         # Namespace utilities
+├── backends/
+│   ├── __init__.py
+│   ├── protocol.py          # BackendProtocol (abstract)
+│   ├── memory.py            # InMemoryBackend
+│   ├── sqlite.py            # SqliteBackend
+│   └── postgres.py          # PostgresBackend
+├── memory_types/            # One module per memory type
+│   ├── __init__.py
+│   ├── base.py              # BaseMemoryManager
+│   ├── conversational.py    # ConversationalManager
+│   ├── knowledge.py         # KnowledgeManager
+│   ├── entity.py            # EntityManager
+│   ├── workflow.py          # WorkflowManager
+│   ├── toolbox.py           # ToolboxManager (VFS)
+│   ├── summary.py           # SummaryManager (expandable)
+│   ├── tool_log.py          # ToolLogManager
+│   ├── skills.py            # SkillsManager
+│   ├── file.py              # FileManager
+│   └── persona.py           # PersonaManager
+├── agents/                  # LangChain-based embedded agents
+│   ├── __init__.py
+│   ├── base.py              # BaseMemoryAgent (extends LangChain BaseTool)
+│   ├── summarizer.py        # Uses LangChain primitives
+│   ├── consolidator.py
+│   ├── entity_extractor.py
+│   ├── gc.py
+│   └── scheduler.py
+├── tools/                   # Agent self-exploration tools
+│   ├── __init__.py
+│   ├── definitions.py       # Tool definitions as LangChain BaseTool subclasses
+│   └── executor.py
+├── integrations/
+│   ├── __init__.py
+│   ├── langchain.py         # LangChain BaseMemory adapter
+│   └── langgraph.py         # LangGraph BaseCheckpointSaver adapter
+└── registry.py              # MemoryTypeRegistry
 ```
 
-## Phase 2: Implement Skipped Tests
+---
 
-### Missing harness methods:
-- `add_tool_log()`, `get_tool_log()` — partially there
-- `add_skill()`, `search_skills()` — partially there  
-- `set_persona()`, `get_active_persona()` — need implementation
-- `unified_search()` — search across all memory types
-- `memory_stats()` — return counts per type
-- `clear_thread()` — delete all memories in a thread
+## Execution Plan (Feature Branches)
 
-## Phase 3: CI/CD
+### Phase 1: Fix CI (branch: `fix/lint-ci`)
+- Fix all ruff lint errors
+- Fix pyproject.toml ruff config (use lint.select not select)
+- Fix the old Deploy Docs workflow (rename/remove)
+- PR → merge to main
 
-### GitHub Actions:
-1. `.github/workflows/test.yml` — run pytest on push/PR
-2. `.github/workflows/lint.yml` — ruff check + mypy
-3. `.github/workflows/publish.yml` — publish to PyPI on tag
+### Phase 2: Split harness.py (branch: `refactor/split-harness`)
+- Extract types → types.py (single MemoryUnit, delete old Pydantic one)
+- Extract BackendProtocol → backends/protocol.py
+- Extract InMemoryBackend → backends/memory.py (already exists, reconcile)
+- Extract embedding logic → core/embedding.py
+- Extract context assembly → core/context.py
+- Create memory_types/ managers (one per type)
+- Slim harness.py → core/harness.py (delegates to managers)
+- Create exceptions.py
+- ALL tests must still pass after refactor
+- PR → merge to main
 
-### Branch strategy:
-- `main` — stable, tagged releases
-- Feature branches → PR → merge
+### Phase 3: LangChain agents (branch: `feat/langchain-agents`)
+- Research latest LangChain/LangGraph memory patterns (MCP docs)
+- Rewrite agents/ using langchain-core primitives
+- Tools as BaseTool subclasses
+- Integration tests
+- PR → merge to main
 
-## Phase 4: LangChain Integration (use existing primitives)
+### Phase 4: Polish & Publish (branch: `feat/publish-ready`)
+- Implement remaining skipped tests
+- Add py.typed marker
+- Build with `python -m build`
+- Test with `twine check`
+- Tag v0.1.0 release
+- Publish to PyPI
 
-Use langchain-core primitives:
-- `BaseTool` for memory tools
-- `BaseMemory` for LangChain memory adapter
-- `BaseCheckpointSaver` for LangGraph checkpointer
-- Don't reinvent — extend
+---
 
-## Phase 5: Build & Publish
-1. Build: `python -m build`
-2. Publish: `twine upload dist/*`
-3. Docs: GitHub Pages with Docusaurus (already scaffolded in docs/)
-
-## Commit Convention
+## Git Workflow
 ```
-feat: add new feature
-fix: bug fix
-docs: documentation only
-test: adding tests
-ci: CI/CD changes
-refactor: code refactoring
-chore: maintenance
+main ← PR ← feature-branch
+         ↑
+    Claude Code review (automated)
 ```
+
+Each branch:
+1. `git checkout -b <branch> main`
+2. Implement + test
+3. `git push origin <branch>`
+4. Create PR via `gh pr create`
+5. Review (automated or manual)
+6. Merge via `gh pr merge`
+
+## Key Principles
+- **No wheel reinvention**: Use LangChain for agents/tools
+- **One file, one concern**: No 2500-line god files
+- **Tests first**: Run after every change
+- **Clean commits**: Conventional commits, small + focused
+- **Python best practices**: Type hints, docstrings, ruff clean
