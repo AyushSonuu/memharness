@@ -48,7 +48,7 @@ async def main():
     # Create your agent with memory read tools
     agent = create_agent(
         model="anthropic:claude-sonnet-4-6",
-        tools=get_memory_tools(harness),  # 7 tools for memory self-awareness
+        tools=get_read_tools(harness),  # 7 tools for memory self-awareness
         system_prompt="You are a helpful assistant with persistent memory.",
     )
 
@@ -264,7 +264,7 @@ async def main():
 
     agent = create_agent(
         model="anthropic:claude-sonnet-4-6",
-        tools=get_memory_tools(harness),
+        tools=get_read_tools(harness),
         middleware=[
             # Inject full memory context (KB, entities, workflows, persona)
             MemharnessContextMiddleware(harness, thread_id=thread_id),
@@ -329,13 +329,138 @@ print(result["final_answer"])
 
 The graph handles: save user msg → assemble context → check size → summarize if needed → call LLM → save response → extract entities → save workflow.
 
+## Summarization Middleware
+
+This middleware checks context size BEFORE the model call and triggers summarization if the context is too large:
+
+```python
+class MemharnessSummarizationMiddleware(AgentMiddleware):
+    """Auto-summarize when context exceeds threshold.
+
+    BEFORE model: checks context token estimate.
+    If > threshold (default 80%), summarizes the oldest conversation
+    messages so the agent sees [Summary] + [recent messages] instead
+    of all 50+ messages.
+    """
+
+    def __init__(
+        self,
+        harness: MemoryHarness,
+        thread_id: str,
+        max_tokens: int = 4000,
+        threshold: float = 0.8,
+    ):
+        super().__init__()
+        self.harness = harness
+        self.thread_id = thread_id
+        self.max_tokens = max_tokens
+        self.threshold = threshold
+
+    async def abefore_model(self, state, runtime):
+        """Check context size and summarize if needed."""
+        from memharness.agents import SummarizerAgent
+
+        messages = state.get("messages", [])
+        total_chars = sum(len(m.content) for m in messages if hasattr(m, "content"))
+        token_estimate = total_chars // 4
+        usage = token_estimate / self.max_tokens
+
+        if usage >= self.threshold:
+            # Summarize older conversation messages
+            summarizer = SummarizerAgent(self.harness)
+            await summarizer.summarize_thread(self.thread_id)
+            # Context will be reloaded by MemharnessConversationMiddleware
+            # which already filters out summarized messages
+
+        return None
+```
+
+## Workflow Save Middleware
+
+This middleware saves the tool execution pattern as a reusable workflow AFTER the agent finishes:
+
+```python
+class MemharnessWorkflowMiddleware(AgentMiddleware):
+    """Save tool execution patterns as reusable workflows.
+
+    AFTER model: if the agent made tool calls, saves the steps
+    as a workflow memory for future reuse.
+    """
+
+    def __init__(self, harness: MemoryHarness, thread_id: str):
+        super().__init__()
+        self.harness = harness
+        self.thread_id = thread_id
+        self._steps: list[str] = []
+
+    async def aafter_model(self, state, runtime):
+        """Track tool calls and save as workflow."""
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        last_msg = messages[-1]
+
+        # Track tool calls
+        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            for tc in last_msg.tool_calls:
+                self._steps.append(f"{tc['name']}({tc.get('args', {})})")
+
+        # When we get a final answer (no tool calls), save the workflow
+        elif isinstance(last_msg, AIMessage) and last_msg.content and self._steps:
+            await self.harness.add_workflow(
+                task=f"Thread {self.thread_id}",
+                steps=self._steps,
+                outcome=last_msg.content[:200],
+            )
+            self._steps = []  # Reset for next turn
+
+        return None
+```
+
+## Complete BEFORE → AFTER Flow
+
+All 5 middleware together:
+
+```python
+thread_id = "user-alice-001"
+
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",
+    tools=get_read_tools(harness),  # 5 read-only tools
+    middleware=[
+        # BEFORE model call:
+        MemharnessSummarizationMiddleware(harness, thread_id, max_tokens=4000),
+        MemharnessContextMiddleware(harness, thread_id),
+        MemharnessConversationMiddleware(harness, thread_id),
+        # AFTER model call:
+        MemharnessEntityMiddleware(harness),
+        MemharnessWorkflowMiddleware(harness, thread_id),
+    ],
+)
+```
+
+```mermaid
+graph TD
+    U["👤 User message"] --> S["🔄 SummarizationMiddleware<br/>Check context size, summarize if >80%"]
+    S --> C["🔄 ContextMiddleware<br/>Load KB, entities, workflows, persona"]
+    C --> CV["🔄 ConversationMiddleware<br/>Load past messages"]
+    CV --> LLM["🤖 YOUR AGENT<br/>(LLM + read tools)"]
+    LLM --> CV2["🔄 ConversationMiddleware<br/>Save user msg + response"]
+    CV2 --> E["🔄 EntityMiddleware<br/>Extract entities from response"]
+    E --> W["🔄 WorkflowMiddleware<br/>Save tool steps as workflow"]
+    W --> R["💬 Response to user"]
+```
+
 ## What Each Middleware Does
 
 | Middleware | When | What |
 |-----------|------|------|
-| **MemharnessContextMiddleware** | BEFORE model | Loads KB, entities, workflows, persona → injects as SystemMessage |
-| **MemharnessConversationMiddleware** | BEFORE + AFTER | Loads past messages → injects. Saves new messages after response |
-| **MemharnessEntityMiddleware** | AFTER model | Extracts entities from response → stores in entity table |
+| **MemharnessSummarizationMiddleware** | BEFORE | Check context size → summarize if >80% |
+| **MemharnessContextMiddleware** | BEFORE | Load KB, entities, workflows, persona → inject as SystemMessage |
+| **MemharnessConversationMiddleware** | BEFORE + AFTER | Load past messages. Save new messages after response |
+| **MemharnessEntityMiddleware** | AFTER | Extract entities from response → upsert to entity table |
+| **MemharnessWorkflowMiddleware** | AFTER | Save tool execution steps as reusable workflow |
 
 ## The 7 Memory Tools
 
