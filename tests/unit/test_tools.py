@@ -18,8 +18,11 @@ from memharness.tools import (
     MemorySearchTool,
     MemoryStatsTool,
     MemoryWriteTool,
+    SummarizeAndStoreTool,
     ToolboxGrepTool,
     ToolboxTreeTool,
+    WriteToolLogTool,
+    WriteWorkflowTool,
     get_memory_tools,
 )
 
@@ -40,7 +43,7 @@ class TestMemoryTools:
         """Test get_memory_tools returns all tools."""
         tools = get_memory_tools(harness)
 
-        assert len(tools) == 9
+        assert len(tools) == 12
         assert all(hasattr(tool, "name") for tool in tools)
         assert all(hasattr(tool, "description") for tool in tools)
         assert all(hasattr(tool, "_arun") for tool in tools)
@@ -56,6 +59,9 @@ class TestMemoryTools:
             "expand_summary",
             "get_conversation_history",
             "assemble_context",
+            "summarize_and_store",
+            "write_tool_log",
+            "write_workflow",
         }
         assert tool_names == expected_names
 
@@ -265,6 +271,129 @@ class TestMemoryTools:
         result = await tool._arun(query="something", thread_id="empty-thread", max_tokens=4000)
         assert isinstance(result, str)
         # Should still return something (even if minimal)
+
+    async def test_summarize_and_store_tool(self, harness):
+        """Test SummarizeAndStoreTool."""
+        # Add some conversation messages
+        await harness.add_conversational("thread1", "user", "What is Python?")
+        await harness.add_conversational(
+            "thread1", "assistant", "Python is a high-level programming language."
+        )
+        await harness.add_conversational("thread1", "user", "What is it used for?")
+        await harness.add_conversational(
+            "thread1",
+            "assistant",
+            "It's used for web development, data science, automation, and more.",
+        )
+
+        tool = SummarizeAndStoreTool(harness=harness)
+
+        # Test summarization
+        result = await tool._arun(thread_id="thread1", max_messages=50)
+        assert isinstance(result, str)
+        assert "Summary ID:" in result
+        assert "Summarized" in result
+        assert "message" in result.lower()
+
+    async def test_summarize_and_store_tool_empty_thread(self, harness):
+        """Test SummarizeAndStoreTool with empty thread."""
+        tool = SummarizeAndStoreTool(harness=harness)
+
+        # Test with non-existent thread
+        result = await tool._arun(thread_id="empty-thread", max_messages=50)
+        assert isinstance(result, str)
+        assert "No messages found" in result
+
+    async def test_write_tool_log_tool(self, harness):
+        """Test WriteToolLogTool."""
+        tool = WriteToolLogTool(harness=harness)
+
+        # Test tool log write
+        result = await tool._arun(
+            tool_name="github/create_issue",
+            tool_input='{"title": "Bug fix", "body": "Fixed the bug"}',
+            tool_output="Issue #42 created",
+            status="success",
+        )
+        assert isinstance(result, str)
+        assert "Tool execution logged" in result
+        assert "Log ID:" in result
+        assert "github/create_issue" in result
+
+    async def test_write_tool_log_tool_error_status(self, harness):
+        """Test WriteToolLogTool with error status."""
+        tool = WriteToolLogTool(harness=harness)
+
+        # Test tool log write with error
+        result = await tool._arun(
+            tool_name="api/call_external",
+            tool_input='{"endpoint": "/users"}',
+            tool_output="Connection timeout",
+            status="error",
+        )
+        assert isinstance(result, str)
+        assert "Tool execution logged" in result
+        assert "error" in result.lower()
+
+    async def test_write_workflow_tool(self, harness):
+        """Test WriteWorkflowTool."""
+        tool = WriteWorkflowTool(harness=harness)
+
+        # Test workflow write
+        result = await tool._arun(
+            task="Deploy application to production",
+            steps=[
+                "Run tests",
+                "Build Docker image",
+                "Push to registry",
+                "Update k8s deployment",
+            ],
+            outcome="Application deployed successfully",
+        )
+        assert isinstance(result, str)
+        assert "Workflow saved" in result
+        assert "Workflow ID:" in result
+        assert "Deploy application" in result
+        assert "Run tests" in result
+
+    async def test_write_workflow_tool_failure(self, harness):
+        """Test WriteWorkflowTool with failure outcome."""
+        tool = WriteWorkflowTool(harness=harness)
+
+        # Test workflow write with failure
+        result = await tool._arun(
+            task="Attempt to deploy application",
+            steps=["Run tests", "Build failed at dependency installation"],
+            outcome="Deployment failed - missing dependencies",
+        )
+        assert isinstance(result, str)
+        assert "Workflow saved" in result
+        assert "failed" in result.lower()
+
+    async def test_summarize_and_store_tool_sync_not_implemented(self, harness):
+        """Test that SummarizeAndStoreTool sync method raises NotImplementedError."""
+        tool = SummarizeAndStoreTool(harness=harness)
+
+        with pytest.raises(NotImplementedError):
+            tool._run(thread_id="thread1")
+
+    async def test_write_tool_log_tool_sync_not_implemented(self, harness):
+        """Test that WriteToolLogTool sync method raises NotImplementedError."""
+        tool = WriteToolLogTool(harness=harness)
+
+        with pytest.raises(NotImplementedError):
+            tool._run(
+                tool_name="test_tool",
+                tool_input="test",
+                tool_output="test",
+            )
+
+    async def test_write_workflow_tool_sync_not_implemented(self, harness):
+        """Test that WriteWorkflowTool sync method raises NotImplementedError."""
+        tool = WriteWorkflowTool(harness=harness)
+
+        with pytest.raises(NotImplementedError):
+            tool._run(task="test", steps=["step1"], outcome="success")
 
 
 @pytest.mark.skipif(LANGCHAIN_AVAILABLE, reason="Test behavior when langchain not available")
