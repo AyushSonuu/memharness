@@ -10,23 +10,23 @@ as the backend storage. This allows you to use memharness's powerful memory
 infrastructure with LangChain chains and agents.
 
 Example:
-    from langchain.chains import ConversationChain
-    from langchain_openai import ChatOpenAI
+    from langchain_core.chat_history import BaseChatMessageHistory
     from memharness import MemoryHarness
-    from memharness.integrations import MemharnessMemory
+    from memharness.integrations import MemharnessChatHistory
 
     # Initialize memharness
     harness = MemoryHarness("sqlite:///memory.db")
+    await harness.connect()
 
-    # Create LangChain-compatible memory
-    memory = MemharnessMemory(harness=harness, thread_id="conversation-1")
+    # Create LangChain-compatible chat history
+    history = MemharnessChatHistory(harness=harness, thread_id="conversation-1")
 
     # Use with LangChain
-    llm = ChatOpenAI()
-    chain = ConversationChain(llm=llm, memory=memory)
-    response = chain.predict(input="Hello!")
+    await history.add_user_message("Hello!")
+    await history.add_ai_message("Hi! How can I help?")
+    messages = await history.aget_messages()
 
-Note: Requires langchain to be installed.
+Note: Requires langchain-core to be installed.
 Install with: pip install memharness[langchain]
 """
 
@@ -37,291 +37,154 @@ from typing import TYPE_CHECKING, Any
 
 # Optional dependency handling for LangChain
 try:
-    from langchain.memory.chat_memory import BaseChatMemory
-    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+    from langchain_core.chat_history import BaseChatMessageHistory
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+    )
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
     # Provide stub classes for type checking when langchain is not installed
-    BaseChatMemory = object  # type: ignore[misc, assignment]
+    BaseChatMessageHistory = object  # type: ignore[misc, assignment]
     BaseMessage = object  # type: ignore[misc, assignment]
     HumanMessage = None  # type: ignore[misc, assignment]
     AIMessage = None  # type: ignore[misc, assignment]
     SystemMessage = None  # type: ignore[misc, assignment]
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from memharness import MemoryHarness
     from memharness.types import MemoryUnit
 
 
 __all__ = [
+    "MemharnessChatHistory",
     "MemharnessMemory",
     "LANGCHAIN_AVAILABLE",
 ]
 
 
-class MemharnessMemory(BaseChatMemory):
+class MemharnessChatHistory(BaseChatMessageHistory):
     """
-    LangChain-compatible memory using memharness backend.
+    LangChain-compatible chat history using memharness backend.
 
-    This class bridges memharness's conversational memory with LangChain's
-    memory interface, allowing seamless integration with LangChain chains
-    and agents.
+    This class implements the BaseChatMessageHistory interface from langchain-core,
+    allowing seamless integration with LangChain chains and agents.
 
     Attributes:
         harness: The MemoryHarness instance to use for storage.
         thread_id: The conversation thread identifier.
-        memory_key: The key used in the memory variables dict (default: "history").
-        return_messages: If True, return LangChain Message objects; if False, return string.
-        human_prefix: Prefix for human messages when formatting as string.
-        ai_prefix: Prefix for AI messages when formatting as string.
-        input_key: Key to look for user input in inputs dict.
-        output_key: Key to look for AI output in outputs dict.
 
     Example:
         >>> harness = MemoryHarness("sqlite:///memory.db")
-        >>> memory = MemharnessMemory(harness=harness, thread_id="thread-1")
+        >>> await harness.connect()
+        >>> history = MemharnessChatHistory(harness=harness, thread_id="thread-1")
         >>>
-        >>> # Save context
-        >>> memory.save_context(
-        ...     inputs={"input": "What is the weather?"},
-        ...     outputs={"output": "I don't have access to weather data."}
-        ... )
+        >>> # Add messages
+        >>> await history.add_user_message("What is the weather?")
+        >>> await history.add_ai_message("I don't have weather data.")
         >>>
-        >>> # Load memory
-        >>> variables = memory.load_memory_variables({})
-        >>> print(variables["history"])
+        >>> # Get messages
+        >>> messages = await history.aget_messages()
+        >>> print(messages)
     """
-
-    # Instance attributes (not class-level Pydantic fields to avoid issues without langchain)
-    harness: Any  # MemoryHarness instance
-    thread_id: str
-    memory_key: str
-    return_messages: bool
-    human_prefix: str
-    ai_prefix: str
-    input_key: str | None
-    output_key: str | None
 
     def __init__(
         self,
         harness: MemoryHarness,
         thread_id: str,
-        memory_key: str = "history",
-        return_messages: bool = True,
-        human_prefix: str = "Human",
-        ai_prefix: str = "AI",
-        input_key: str | None = None,
-        output_key: str | None = None,
-        **kwargs: Any,
     ) -> None:
         """
-        Initialize MemharnessMemory.
+        Initialize MemharnessChatHistory.
 
         Args:
             harness: The MemoryHarness instance to use for storage.
             thread_id: The conversation thread identifier.
-            memory_key: The key used in the memory variables dict.
-            return_messages: If True, return LangChain Message objects.
-            human_prefix: Prefix for human messages when formatting as string.
-            ai_prefix: Prefix for AI messages when formatting as string.
-            input_key: Key to look for user input (auto-detected if None).
-            output_key: Key to look for AI output (auto-detected if None).
-            **kwargs: Additional arguments passed to BaseChatMemory.
 
         Raises:
-            ImportError: If langchain is not installed.
+            ImportError: If langchain-core is not installed.
         """
         if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain is not installed. Install with: pip install memharness[langchain]"
-            )
+            msg = "langchain-core is not installed. Install with: pip install memharness[langchain]"
+            raise ImportError(msg)
 
-        super().__init__(**kwargs)
         self.harness = harness
         self.thread_id = thread_id
-        self.memory_key = memory_key
-        self.return_messages = return_messages
-        self.human_prefix = human_prefix
-        self.ai_prefix = ai_prefix
-        self.input_key = input_key
-        self.output_key = output_key
 
     @property
-    def memory_variables(self) -> list[str]:
+    def messages(self) -> list[BaseMessage]:
         """
-        Return the list of memory variable keys.
+        Synchronous property to get messages (required by BaseChatMessageHistory).
+
+        Note: This runs the async method in a sync context.
+        Prefer using aget_messages() in async contexts.
 
         Returns:
-            List containing the memory_key.
+            List of LangChain BaseMessage objects.
         """
-        return [self.memory_key]
+        return self._run_async(self.aget_messages())
 
-    def load_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
+    async def aget_messages(self) -> list[BaseMessage]:
         """
-        Load conversation history from memharness.
-
-        This method retrieves all conversational memories for the thread
-        and returns them in the format expected by LangChain.
-
-        Args:
-            inputs: The current inputs (not used, but required by interface).
+        Async method to get messages from memharness.
 
         Returns:
-            Dict with memory_key mapping to either List[BaseMessage] or str,
-            depending on the return_messages setting.
-        """
-        memories = self._run_async(self.harness.get_conversational(self.thread_id))
-
-        if self.return_messages:
-            return {self.memory_key: self._to_langchain_messages(memories)}
-        else:
-            return {self.memory_key: self._format_as_string(memories)}
-
-    async def aload_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
-        """
-        Async version of load_memory_variables.
-
-        Args:
-            inputs: The current inputs (not used, but required by interface).
-
-        Returns:
-            Dict with memory_key mapping to conversation history.
+            List of LangChain BaseMessage objects.
         """
         memories = await self.harness.get_conversational(self.thread_id)
+        return self._to_langchain_messages(memories)
 
-        if self.return_messages:
-            return {self.memory_key: self._to_langchain_messages(memories)}
-        else:
-            return {self.memory_key: self._format_as_string(memories)}
-
-    def save_context(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
+    def add_messages(self, messages: Sequence[BaseMessage]) -> None:
         """
-        Save user input and AI output to memharness.
-
-        This method extracts the user input and AI output from the provided
-        dicts and stores them as conversational memories.
+        Synchronous method to add messages.
 
         Args:
-            inputs: Dict containing user input (looks for 'input', 'question',
-                   or 'human_input' keys).
-            outputs: Dict containing AI output (looks for 'output', 'answer',
-                    or 'response' keys).
-        """
-        # Extract user input
-        user_input = self._get_input_value(inputs)
-        if user_input:
-            self._run_async(
-                self.harness.add_conversational(
-                    thread_id=self.thread_id,
-                    role="user",
-                    content=user_input,
-                )
-            )
+            messages: Sequence of BaseMessage objects to add.
 
-        # Extract AI output
-        ai_output = self._get_output_value(outputs)
-        if ai_output:
-            self._run_async(
-                self.harness.add_conversational(
-                    thread_id=self.thread_id,
-                    role="assistant",
-                    content=ai_output,
-                )
-            )
-
-    async def asave_context(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
+        Note: This runs the async method in a sync context.
+        Prefer using aadd_messages() in async contexts.
         """
-        Async version of save_context.
+        self._run_async(self.aadd_messages(messages))
+
+    async def aadd_messages(self, messages: Sequence[BaseMessage]) -> None:
+        """
+        Async method to add messages to memharness.
 
         Args:
-            inputs: Dict containing user input.
-            outputs: Dict containing AI output.
+            messages: Sequence of BaseMessage objects to add.
         """
-        # Extract user input
-        user_input = self._get_input_value(inputs)
-        if user_input:
-            await self.harness.add_conversational(
-                thread_id=self.thread_id,
-                role="user",
-                content=user_input,
-            )
+        for message in messages:
+            role = self._get_role_from_message(message)
+            content = message.content
+            if isinstance(content, list):
+                # Handle complex content (images, etc.) by converting to string
+                content = str(content)
 
-        # Extract AI output
-        ai_output = self._get_output_value(outputs)
-        if ai_output:
             await self.harness.add_conversational(
                 thread_id=self.thread_id,
-                role="assistant",
-                content=ai_output,
+                role=role,
+                content=content,
             )
 
     def clear(self) -> None:
         """
-        Clear conversation history for this thread.
+        Synchronous method to clear conversation history.
 
-        Note: This operation requires the harness to support clearing
-        conversational memory. If not supported, this is a no-op.
+        Note: This runs the async method in a sync context.
+        Prefer using aclear() in async contexts.
         """
-        # Check if harness has a clear method
-        if hasattr(self.harness, "clear_conversational"):
-            self._run_async(self.harness.clear_conversational(self.thread_id))
+        self._run_async(self.aclear())
 
     async def aclear(self) -> None:
         """
-        Async version of clear.
+        Async method to clear conversation history for this thread.
         """
-        if hasattr(self.harness, "clear_conversational"):
-            await self.harness.clear_conversational(self.thread_id)
-
-    def _get_input_value(self, inputs: dict[str, Any]) -> str | None:
-        """
-        Extract user input from inputs dict.
-
-        Args:
-            inputs: The inputs dict.
-
-        Returns:
-            The user input string or None if not found.
-        """
-        if self.input_key:
-            return inputs.get(self.input_key)
-
-        # Try common input keys
-        for key in ["input", "question", "human_input", "query", "text"]:
-            if key in inputs:
-                return inputs[key]
-
-        # If only one key, use it
-        if len(inputs) == 1:
-            return list(inputs.values())[0]
-
-        return None
-
-    def _get_output_value(self, outputs: dict[str, Any]) -> str | None:
-        """
-        Extract AI output from outputs dict.
-
-        Args:
-            outputs: The outputs dict.
-
-        Returns:
-            The AI output string or None if not found.
-        """
-        if self.output_key:
-            return outputs.get(self.output_key)
-
-        # Try common output keys
-        for key in ["output", "answer", "response", "text", "result"]:
-            if key in outputs:
-                return outputs[key]
-
-        # If only one key, use it
-        if len(outputs) == 1:
-            return list(outputs.values())[0]
-
-        return None
+        await self.harness.clear_thread(self.thread_id)
 
     def _to_langchain_messages(self, memories: list[MemoryUnit]) -> list[BaseMessage]:
         """
@@ -351,32 +214,25 @@ class MemharnessMemory(BaseChatMemory):
 
         return messages
 
-    def _format_as_string(self, memories: list[MemoryUnit]) -> str:
+    def _get_role_from_message(self, message: BaseMessage) -> str:
         """
-        Format memories as a conversation string.
+        Extract role from LangChain message type.
 
         Args:
-            memories: List of MemoryUnit objects from memharness.
+            message: LangChain BaseMessage object.
 
         Returns:
-            Formatted conversation string.
+            Role string ("user", "assistant", or "system").
         """
-        lines: list[str] = []
-
-        for mem in memories:
-            role = mem.metadata.get("role", "user") if mem.metadata else "user"
-            content = mem.content
-
-            if role == "user" or role == "human":
-                prefix = self.human_prefix
-            elif role == "assistant" or role == "ai":
-                prefix = self.ai_prefix
-            else:
-                prefix = role.capitalize()
-
-            lines.append(f"{prefix}: {content}")
-
-        return "\n".join(lines)
+        if isinstance(message, HumanMessage):
+            return "user"
+        elif isinstance(message, AIMessage):
+            return "assistant"
+        elif isinstance(message, SystemMessage):
+            return "system"
+        else:
+            # Default to user for unknown message types
+            return "user"
 
     @staticmethod
     def _run_async(coro: Any) -> Any:
@@ -398,10 +254,75 @@ class MemharnessMemory(BaseChatMemory):
             # No running loop, create one
             return asyncio.run(coro)
 
-        # If we're in a running loop (e.g., Jupyter), use nest_asyncio pattern
-        # or create a new thread
+        # If we're in a running loop (e.g., Jupyter), use thread executor
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(asyncio.run, coro)
             return future.result()
+
+
+# Backward compatibility: MemharnessMemory wraps MemharnessChatHistory
+# with BaseMemory-like interface (save_context, load_memory_variables)
+
+
+class MemharnessMemory:
+    """Memory wrapper with BaseMemory-compatible interface.
+
+    Provides save_context/load_memory_variables interface on top of
+    MemharnessChatHistory for backward compatibility with older LangChain patterns.
+
+    Args:
+        harness: The MemoryHarness instance.
+        thread_id: Conversation thread identifier.
+        memory_key: Key for memory variables dict. Defaults to "history".
+        return_messages: If True, return Message objects; if False, return string.
+    """
+
+    def __init__(
+        self,
+        harness: MemoryHarness,
+        thread_id: str,
+        memory_key: str = "history",
+        return_messages: bool = True,
+    ) -> None:
+        if not LANGCHAIN_AVAILABLE:
+            msg = "langchain-core required. Install: pip install memharness[langchain]"
+            raise ImportError(msg)
+        self.harness = harness
+        self.thread_id = thread_id
+        self.memory_key = memory_key
+        self.return_messages = return_messages
+        self._chat_history = MemharnessChatHistory(harness=harness, thread_id=thread_id)
+
+    @property
+    def memory_variables(self) -> list[str]:
+        """Return the list of memory variable keys."""
+        return [self.memory_key]
+
+    async def aload_memory_variables(self, inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Load memory variables (async)."""
+        messages = await self._chat_history.aget_messages()
+        if self.return_messages:
+            return {self.memory_key: messages}
+        # Convert to string
+        lines = []
+        for msg in messages:
+            role = "Human" if isinstance(msg, HumanMessage) else "AI"
+            lines.append(f"{role}: {msg.content}")
+        return {self.memory_key: "\n".join(lines)}
+
+    async def asave_context(self, inputs: dict[str, Any], outputs: dict[str, str]) -> None:
+        """Save conversation context (async)."""
+        input_val = inputs.get("input", str(inputs))
+        output_val = outputs.get("output", str(outputs))
+        await self._chat_history.aadd_messages(
+            [
+                HumanMessage(content=input_val),
+                AIMessage(content=output_val),
+            ]
+        )
+
+    async def aclear(self) -> None:
+        """Clear memory (async)."""
+        await self._chat_history.aclear()

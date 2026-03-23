@@ -28,7 +28,7 @@ Install with: pip install memharness[langchain] or pip install memharness[langgr
 
 from memharness.integrations.langchain import (
     LANGCHAIN_AVAILABLE,
-    MemharnessMemory,
+    MemharnessChatHistory,
 )
 from memharness.integrations.langgraph import (
     LANGGRAPH_AVAILABLE,
@@ -36,7 +36,7 @@ from memharness.integrations.langgraph import (
 )
 
 __all__ = [
-    "MemharnessMemory",
+    "MemharnessChatHistory",
     "MemharnessCheckpointer",
     "LANGCHAIN_AVAILABLE",
     "LANGGRAPH_AVAILABLE",
