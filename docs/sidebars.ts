@@ -25,7 +25,6 @@ const sidebars: SidebarsConfig = {
         'memory-types/toolbox',
         'memory-types/summary',
         'memory-types/tool-log',
-        'memory-types/skills',
         'memory-types/file',
         'memory-types/persona',
       ],
@@ -48,6 +47,7 @@ const sidebars: SidebarsConfig = {
         'agents/entity-extractor',
         'agents/consolidator',
         'agents/gc',
+        'agents/context-assembler',
       ],
     },
     {
