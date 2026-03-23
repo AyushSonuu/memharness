@@ -223,12 +223,14 @@ class TestMemoryUnitSerialization:
 
     def test_from_json(self):
         """Test JSON deserialization."""
-        json_str = json.dumps({
-            "id": str(uuid4()),
-            "content": "JSON test",
-            "memory_type": "conversational",
-            "metadata": {},
-        })
+        json_str = json.dumps(
+            {
+                "id": str(uuid4()),
+                "content": "JSON test",
+                "memory_type": "conversational",
+                "metadata": {},
+            }
+        )
 
         unit = MemoryUnit.from_json(json_str)
 

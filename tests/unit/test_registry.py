@@ -5,7 +5,6 @@ Tests registry functionality including type registration,
 retrieval, and custom type support.
 """
 
-
 import pytest
 
 from memharness import MemoryType, MemoryTypeRegistry
@@ -42,8 +41,9 @@ class TestRegistryInitialization:
         ]
 
         for expected in expected_types:
-            assert expected in registered_types or expected.value in [t.value for t in registered_types], \
-                f"MemoryType.{expected.name} not registered"
+            assert expected in registered_types or expected.value in [
+                t.value for t in registered_types
+            ], f"MemoryType.{expected.name} not registered"
 
     def test_registered_types_count(self):
         """Test that exactly 10 types are registered."""
@@ -238,6 +238,7 @@ class TestCustomTypeRegistration:
         registry = MemoryTypeRegistry.get_instance()
 
         try:
+
             @registry.register_handler("decorated_type")
             class DecoratedHandler:
                 pass
@@ -283,8 +284,9 @@ class TestTypeHandlerInterface:
 
         for method in expected_methods:
             try:
-                assert hasattr(handler, method) or callable(getattr(handler, method, None)), \
+                assert hasattr(handler, method) or callable(getattr(handler, method, None)), (
                     f"Handler missing method: {method}"
+                )
             except AssertionError:
                 # Method might be optional
                 pass
@@ -399,6 +401,7 @@ class TestRegistryThreadSafety:
 
         def register_type(index):
             try:
+
                 class Handler:
                     def __init__(self, idx):
                         self.idx = idx

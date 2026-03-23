@@ -45,6 +45,7 @@ try:
         CheckpointMetadata,
         CheckpointTuple,
     )
+
     LANGGRAPH_AVAILABLE = True
 except ImportError:
     LANGGRAPH_AVAILABLE = False
@@ -111,8 +112,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         """
         if not LANGGRAPH_AVAILABLE:
             raise ImportError(
-                "langgraph is not installed. "
-                "Install with: pip install memharness[langgraph]"
+                "langgraph is not installed. Install with: pip install memharness[langgraph]"
             )
 
         super().__init__(serde=serde)
@@ -162,8 +162,8 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             else:
                 # Get the latest
                 if checkpoint_data is None or (
-                    mem.metadata.get("timestamp", "") >
-                    checkpoint_data.metadata.get("timestamp", "")
+                    mem.metadata.get("timestamp", "")
+                    > checkpoint_data.metadata.get("timestamp", "")
                 ):
                     checkpoint_data = mem
 
@@ -286,9 +286,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
             # Apply custom filter
             if filter:
-                metadata = self._deserialize_metadata(
-                    mem.metadata.get("checkpoint_metadata", "{}")
-                )
+                metadata = self._deserialize_metadata(mem.metadata.get("checkpoint_metadata", "{}"))
                 skip = False
                 for key, value in filter.items():
                     if metadata.get(key) != value:
@@ -300,9 +298,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             # Deserialize and yield
             try:
                 checkpoint = self._deserialize_checkpoint(mem.content)
-                metadata = self._deserialize_metadata(
-                    mem.metadata.get("checkpoint_metadata", "{}")
-                )
+                metadata = self._deserialize_metadata(mem.metadata.get("checkpoint_metadata", "{}"))
             except Exception:
                 continue
 
@@ -351,9 +347,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         Returns:
             Updated config with the new checkpoint_id.
         """
-        return self._run_async(
-            self.aput(config, checkpoint, metadata, new_versions)
-        )
+        return self._run_async(self.aput(config, checkpoint, metadata, new_versions))
 
     async def aput(
         self,
@@ -449,15 +443,21 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
         writes_data = []
         for channel, value in writes:
             try:
-                writes_data.append({
-                    "channel": channel,
-                    "value": self.serde.dumps(value) if self.serde else json.dumps(value, default=str),
-                })
+                writes_data.append(
+                    {
+                        "channel": channel,
+                        "value": self.serde.dumps(value)
+                        if self.serde
+                        else json.dumps(value, default=str),
+                    }
+                )
             except Exception:
-                writes_data.append({
-                    "channel": channel,
-                    "value": str(value),
-                })
+                writes_data.append(
+                    {
+                        "channel": channel,
+                        "value": str(value),
+                    }
+                )
 
         await self.harness.add_workflow(
             workflow_id=workflow_id,
@@ -471,9 +471,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
             },
         )
 
-    def _build_workflow_id(
-        self, thread_id: str, checkpoint_id: str | None = None
-    ) -> str:
+    def _build_workflow_id(self, thread_id: str, checkpoint_id: str | None = None) -> str:
         """
         Build a workflow ID for memharness storage.
 
@@ -558,6 +556,7 @@ class MemharnessCheckpointer(BaseCheckpointSaver):
 
         # If we're in a running loop, use thread pool
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(asyncio.run, coro)
             return future.result()

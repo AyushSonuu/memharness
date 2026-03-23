@@ -4,6 +4,8 @@
 
 """In-memory backend for testing and development."""
 
+from __future__ import annotations
+
 import copy
 import math
 from collections import defaultdict
@@ -46,7 +48,7 @@ class InMemoryBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: list[float] | None = None
+        embedding: list[float] | None = None,
     ) -> str:
         """Write a memory to storage.
 
@@ -67,11 +69,7 @@ class InMemoryBackend:
 
         return key
 
-    async def read(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> dict | None:
+    async def read(self, namespace: tuple[str, ...], key: str) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -90,7 +88,7 @@ class InMemoryBackend:
         query: str,
         embedding: list[float] | None = None,
         k: int = 10,
-        filters: dict | None = None
+        filters: dict | None = None,
     ) -> list[dict]:
         """Search memories using text query or embedding similarity.
 
@@ -158,7 +156,7 @@ class InMemoryBackend:
         namespace: tuple[str, ...],
         filters: dict | None = None,
         order_by: str | None = None,
-        limit: int | None = None
+        limit: int | None = None,
     ) -> list[dict]:
         """List memories with optional filtering and ordering.
 
@@ -189,10 +187,7 @@ class InMemoryBackend:
             descending = order_by.startswith("-")
             field = order_by[1:] if descending else order_by
 
-            results.sort(
-                key=lambda x: x.get(field, ""),
-                reverse=descending
-            )
+            results.sort(key=lambda x: x.get(field, ""), reverse=descending)
 
         # Apply limit
         if limit is not None:
@@ -200,11 +195,7 @@ class InMemoryBackend:
 
         return results
 
-    async def delete(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> bool:
+    async def delete(self, namespace: tuple[str, ...], key: str) -> bool:
         """Delete a memory by key.
 
         Args:
@@ -230,7 +221,7 @@ class InMemoryBackend:
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: list[float] | None = None
+        embedding: list[float] | None = None,
     ) -> bool:
         """Update an existing memory.
 

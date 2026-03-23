@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 try:
     from langchain.memory.chat_memory import BaseChatMemory
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
@@ -134,8 +135,7 @@ class MemharnessMemory(BaseChatMemory):
         """
         if not LANGCHAIN_AVAILABLE:
             raise ImportError(
-                "langchain is not installed. "
-                "Install with: pip install memharness[langchain]"
+                "langchain is not installed. Install with: pip install memharness[langchain]"
             )
 
         super().__init__(**kwargs)
@@ -172,9 +172,7 @@ class MemharnessMemory(BaseChatMemory):
             Dict with memory_key mapping to either List[BaseMessage] or str,
             depending on the return_messages setting.
         """
-        memories = self._run_async(
-            self.harness.get_conversational(self.thread_id)
-        )
+        memories = self._run_async(self.harness.get_conversational(self.thread_id))
 
         if self.return_messages:
             return {self.memory_key: self._to_langchain_messages(memories)}
@@ -233,9 +231,7 @@ class MemharnessMemory(BaseChatMemory):
                 )
             )
 
-    async def asave_context(
-        self, inputs: dict[str, Any], outputs: dict[str, Any]
-    ) -> None:
+    async def asave_context(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
         """
         Async version of save_context.
 
@@ -269,16 +265,14 @@ class MemharnessMemory(BaseChatMemory):
         conversational memory. If not supported, this is a no-op.
         """
         # Check if harness has a clear method
-        if hasattr(self.harness, 'clear_conversational'):
-            self._run_async(
-                self.harness.clear_conversational(self.thread_id)
-            )
+        if hasattr(self.harness, "clear_conversational"):
+            self._run_async(self.harness.clear_conversational(self.thread_id))
 
     async def aclear(self) -> None:
         """
         Async version of clear.
         """
-        if hasattr(self.harness, 'clear_conversational'):
+        if hasattr(self.harness, "clear_conversational"):
             await self.harness.clear_conversational(self.thread_id)
 
     def _get_input_value(self, inputs: dict[str, Any]) -> str | None:
@@ -329,9 +323,7 @@ class MemharnessMemory(BaseChatMemory):
 
         return None
 
-    def _to_langchain_messages(
-        self, memories: list[MemoryUnit]
-    ) -> list[BaseMessage]:
+    def _to_langchain_messages(self, memories: list[MemoryUnit]) -> list[BaseMessage]:
         """
         Convert MemoryUnits to LangChain message objects.
 
@@ -409,6 +401,7 @@ class MemharnessMemory(BaseChatMemory):
         # If we're in a running loop (e.g., Jupyter), use nest_asyncio pattern
         # or create a new thread
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(asyncio.run, coro)
             return future.result()

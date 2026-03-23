@@ -45,11 +45,7 @@ class TestAgentConfiguration:
     async def test_agent_model_configuration(self, memory):
         """Test configuring agent model."""
         try:
-            await memory.configure_agent(
-                model="gpt-4o-mini",
-                temperature=0.7,
-                max_tokens=1000
-            )
+            await memory.configure_agent(model="gpt-4o-mini", temperature=0.7, max_tokens=1000)
 
             config = await memory.get_agent_config()
             assert config.get("model") == "gpt-4o-mini"
@@ -90,7 +86,9 @@ class TestSummarizationAgent:
         await memory.add_conversational("t1", "user", "What is Python?")
         await memory.add_conversational("t1", "assistant", "Python is a programming language.")
         await memory.add_conversational("t1", "user", "What can it do?")
-        await memory.add_conversational("t1", "assistant", "It can do web dev, data science, AI, and more.")
+        await memory.add_conversational(
+            "t1", "assistant", "It can do web dev, data science, AI, and more."
+        )
 
         try:
             summary = await memory.summarize_thread("t1", force=True)
@@ -105,8 +103,12 @@ class TestSummarizationAgent:
     @pytest.mark.agents
     async def test_summarization_preserves_key_info(self, memory):
         """Test that summarization preserves key information."""
-        await memory.add_conversational("t1", "user", "The meeting is scheduled for January 15th at 3pm")
-        await memory.add_conversational("t1", "assistant", "I've noted the meeting on January 15th at 3pm")
+        await memory.add_conversational(
+            "t1", "user", "The meeting is scheduled for January 15th at 3pm"
+        )
+        await memory.add_conversational(
+            "t1", "assistant", "I've noted the meeting on January 15th at 3pm"
+        )
         await memory.add_conversational("t1", "user", "John and Sarah will attend")
         await memory.add_conversational("t1", "assistant", "Got it - John and Sarah are confirmed")
 
@@ -140,9 +142,7 @@ class TestContextAssemblyAgent:
 
         try:
             context = await memory.assemble_context_intelligent(
-                query="data analysis with Python",
-                thread_id="t1",
-                max_tokens=1000
+                query="data analysis with Python", thread_id="t1", max_tokens=1000
             )
 
             # Data science content should rank higher
@@ -160,9 +160,7 @@ class TestContextAssemblyAgent:
 
         try:
             context = await memory.assemble_context(
-                query="container orchestration",
-                thread_id="t1",
-                rerank=True
+                query="container orchestration", thread_id="t1", rerank=True
             )
 
             assert context is not None
@@ -179,9 +177,7 @@ class TestContextAssemblyAgent:
 
         try:
             context = await memory.assemble_context_intelligent(
-                query="knowledge",
-                thread_id="t1",
-                max_tokens=500
+                query="knowledge", thread_id="t1", max_tokens=500
             )
 
             # Context should be within budget (rough estimate)
@@ -447,7 +443,7 @@ class TestMockedAgents:
         await memory.add_conversational("t1", "assistant", "Response 1")
 
         try:
-            with patch.object(memory, '_llm_call', new_callable=AsyncMock) as mock_llm:
+            with patch.object(memory, "_llm_call", new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = "Mocked summary of the conversation"
 
                 summary = await memory.summarize_thread("t1", force=True)
@@ -462,10 +458,12 @@ class TestMockedAgents:
     async def test_entity_extraction_with_mock(self, memory):
         """Test entity extraction with mocked LLM."""
         try:
-            with patch.object(memory, '_extract_entities_llm', new_callable=AsyncMock) as mock_extract:
+            with patch.object(
+                memory, "_extract_entities_llm", new_callable=AsyncMock
+            ) as mock_extract:
                 mock_extract.return_value = [
                     {"name": "John Doe", "type": "PERSON"},
-                    {"name": "Acme Corp", "type": "ORGANIZATION"}
+                    {"name": "Acme Corp", "type": "ORGANIZATION"},
                 ]
 
                 entities = await memory.extract_entities("John Doe works at Acme Corp")
@@ -492,7 +490,7 @@ class TestAgentErrorHandling:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
                     memory.summarize_thread("t1", force=True),
-                    timeout=0.001  # Immediate timeout
+                    timeout=0.001,  # Immediate timeout
                 )
         except AttributeError:
             pytest.skip("Summarization not implemented")
@@ -505,7 +503,7 @@ class TestAgentErrorHandling:
 
         try:
             # Simulate agent failure
-            with patch.object(memory, '_llm_call', new_callable=AsyncMock) as mock_llm:
+            with patch.object(memory, "_llm_call", new_callable=AsyncMock) as mock_llm:
                 mock_llm.side_effect = Exception("LLM unavailable")
 
                 # Should fall back gracefully
@@ -522,10 +520,7 @@ class TestAgentErrorHandling:
         """Test agent respects rate limits."""
         try:
             # Make many rapid requests
-            tasks = [
-                memory.summarize_thread(f"t{i}", force=True)
-                for i in range(10)
-            ]
+            tasks = [memory.summarize_thread(f"t{i}", force=True) for i in range(10)]
 
             # Should handle rate limiting gracefully
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -550,7 +545,9 @@ class TestAgentIntegration:
         """Test full conversation workflow with agents."""
         # Simulate a conversation
         await memory.add_conversational("t1", "user", "Hi, I'm working on a Python project")
-        await memory.add_conversational("t1", "assistant", "I'd be happy to help with your Python project")
+        await memory.add_conversational(
+            "t1", "assistant", "I'd be happy to help with your Python project"
+        )
         await memory.add_conversational("t1", "user", "I need to add database support")
         await memory.add_conversational("t1", "assistant", "SQLite or PostgreSQL would work well")
 
@@ -560,10 +557,7 @@ class TestAgentIntegration:
 
         try:
             # Assemble context for next query
-            context = await memory.assemble_context(
-                "What database should I use?",
-                thread_id="t1"
-            )
+            context = await memory.assemble_context("What database should I use?", thread_id="t1")
 
             assert context is not None
             # Should include conversation history and relevant knowledge

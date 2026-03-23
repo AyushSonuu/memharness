@@ -84,22 +84,16 @@ class MemoryToolExecutor:
         """
         if tool_name not in self._tools:
             available = ", ".join(sorted(self._tools.keys()))
-            raise ValueError(
-                f"Unknown tool: '{tool_name}'. Available tools: {available}"
-            )
+            raise ValueError(f"Unknown tool: '{tool_name}'. Available tools: {available}")
 
         try:
             return await self._tools[tool_name](**kwargs)
         except TypeError as e:
             # Provide helpful error for wrong arguments
-            raise TypeError(
-                f"Invalid arguments for tool '{tool_name}': {e}"
-            ) from e
+            raise TypeError(f"Invalid arguments for tool '{tool_name}': {e}") from e
         except Exception as e:
             # Re-raise with context
-            raise type(e)(
-                f"Error executing tool '{tool_name}': {e}"
-            ) from e
+            raise type(e)(f"Error executing tool '{tool_name}': {e}") from e
 
     # =========================================================================
     # Memory Tools
@@ -179,20 +173,24 @@ class MemoryToolExecutor:
         if memory.updated_at:
             lines.append(f"Updated: {self._format_datetime(memory.updated_at)}")
 
-        lines.extend([
-            "",
-            "Content:",
-            "-" * 30,
-            memory.content,
-        ])
+        lines.extend(
+            [
+                "",
+                "Content:",
+                "-" * 30,
+                memory.content,
+            ]
+        )
 
         if memory.metadata:
-            lines.extend([
-                "",
-                "Metadata:",
-                "-" * 30,
-                self._format_metadata(memory.metadata),
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Metadata:",
+                    "-" * 30,
+                    self._format_metadata(memory.metadata),
+                ]
+            )
 
         return "\n".join(lines)
 
@@ -263,34 +261,36 @@ class MemoryToolExecutor:
         total_count = stats.get("total_count", 0)
         total_size = stats.get("total_size_bytes", 0)
 
-        lines.extend([
-            f"Total memories: {total_count:,}",
-            f"Total size: {self._format_bytes(total_size)}",
-            "",
-            "By Type:",
-            "-" * 30,
-        ])
+        lines.extend(
+            [
+                f"Total memories: {total_count:,}",
+                f"Total size: {self._format_bytes(total_size)}",
+                "",
+                "By Type:",
+                "-" * 30,
+            ]
+        )
 
         # Per-type stats
         type_stats = stats.get("by_type", {})
         for memory_type, type_info in sorted(type_stats.items()):
             count = type_info.get("count", 0)
             size = type_info.get("size_bytes", 0)
-            lines.append(
-                f"  {memory_type}: {count:,} items ({self._format_bytes(size)})"
-            )
+            lines.append(f"  {memory_type}: {count:,} items ({self._format_bytes(size)})")
 
         # Health metrics if available
         if "health" in stats:
             health = stats["health"]
-            lines.extend([
-                "",
-                "Health:",
-                "-" * 30,
-                f"  Status: {health.get('status', 'unknown')}",
-                f"  Last vacuum: {health.get('last_vacuum', 'never')}",
-                f"  Fragmentation: {health.get('fragmentation', 0):.1%}",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Health:",
+                    "-" * 30,
+                    f"  Status: {health.get('status', 'unknown')}",
+                    f"  Last vacuum: {health.get('last_vacuum', 'never')}",
+                    f"  Fragmentation: {health.get('fragmentation', 0):.1%}",
+                ]
+            )
 
         return "\n".join(lines)
 
@@ -519,8 +519,7 @@ class MemoryToolExecutor:
         if not matches:
             return self._format_empty_results(
                 "toolbox_cat",
-                f"Tool not found: '{tool_name}'"
-                + (f" in server '{server}'" if server else ""),
+                f"Tool not found: '{tool_name}'" + (f" in server '{server}'" if server else ""),
             )
 
         if len(matches) > 1:
@@ -547,19 +546,23 @@ class MemoryToolExecutor:
         # Parameters
         params = tool.get("parameters", tool.get("input_schema", {}))
         if params:
-            lines.extend([
-                "Parameters:",
-                "-" * 30,
-                self._format_tool_params(params),
-            ])
+            lines.extend(
+                [
+                    "Parameters:",
+                    "-" * 30,
+                    self._format_tool_params(params),
+                ]
+            )
 
         # Examples if available
         if "examples" in tool:
-            lines.extend([
-                "",
-                "Examples:",
-                "-" * 30,
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Examples:",
+                    "-" * 30,
+                ]
+            )
             for example in tool["examples"]:
                 lines.append(f"  {json.dumps(example, indent=2)}")
 

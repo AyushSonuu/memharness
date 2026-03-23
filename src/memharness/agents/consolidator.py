@@ -222,9 +222,7 @@ class ConsolidatorAgent(EmbeddedAgent):
                     mem_a = type_memories[i]
                     mem_b = type_memories[j]
 
-                    similarity, sim_type = await self._calculate_similarity(
-                        mem_a, mem_b
-                    )
+                    similarity, sim_type = await self._calculate_similarity(mem_a, mem_b)
 
                     if similarity >= self.config.consolidator_similarity_threshold:
                         matches.append(
@@ -272,9 +270,7 @@ class ConsolidatorAgent(EmbeddedAgent):
             )
 
         # Heuristic similarity
-        return self._calculate_heuristic_similarity(
-            content_a, content_b, norm_a, norm_b
-        )
+        return self._calculate_heuristic_similarity(content_a, content_b, norm_a, norm_b)
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison."""
@@ -359,7 +355,8 @@ Respond with ONLY a number between 0.0 and 1.0."""
                 response = response if isinstance(response, str) else str(response)
             else:
                 return self._calculate_heuristic_similarity(
-                    content_a, content_b,
+                    content_a,
+                    content_b,
                     self._normalize_text(content_a),
                     self._normalize_text(content_b),
                 )
@@ -384,7 +381,8 @@ Respond with ONLY a number between 0.0 and 1.0."""
 
         # Fallback to heuristic
         return self._calculate_heuristic_similarity(
-            content_a, content_b,
+            content_a,
+            content_b,
             self._normalize_text(content_a),
             self._normalize_text(content_b),
         )

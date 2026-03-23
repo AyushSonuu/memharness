@@ -2,635 +2,409 @@
 # Copyright (c) 2026 Ayush Sonuu
 # Licensed under MIT License
 
-"""SQLite backend with async support and vector similarity search."""
+"""SQLite backend implementing BackendProtocol from harness.py"""
+
+from __future__ import annotations
 
 import json
 import logging
 import math
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
+# Import MemoryType and MemoryUnit from parent module
+from ..harness import MemoryType, MemoryUnit
+
 logger = logging.getLogger(__name__)
 
 
-class SQLiteBackendError(Exception):
-    """Exception raised for SQLite backend errors."""
-    pass
+class SqliteBackend:
+    """
+    SQLite storage backend implementing BackendProtocol.
 
-
-class SQLiteBackend:
-    """SQLite storage backend with async support.
-
-    Features:
-    - Async operations via aiosqlite
-    - Vector similarity search using cosine similarity
-    - Automatic table creation per namespace
-    - B-tree indexing for efficient queries
-    - JSON storage for flexible memory schemas
-
-    Example:
-        backend = SQLiteBackend("./memory.db")
-        await backend.connect()
-        await backend.write(("kb",), "key1", {"content": "hello"}, embedding=[0.1, 0.2])
-        results = await backend.search(("kb",), "hello", embedding=[0.1, 0.2], k=5)
-        await backend.disconnect()
+    Stores MemoryUnit objects in a single table with vector embeddings support.
+    Uses cosine similarity for semantic search.
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
-        """Initialize SQLite backend.
+        """
+        Initialize SQLite backend.
 
         Args:
-            db_path: Path to SQLite database file, or ":memory:" for in-memory
+            db_path: Path to SQLite database file, or ":memory:" for in-memory.
         """
         self._db_path = db_path
         self._connection: aiosqlite.Connection | None = None
-        self._initialized_tables: set[str] = set()
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if backend is connected."""
-        return self._connection is not None
 
     async def connect(self) -> None:
-        """Initialize database connection and create base schema.
-
-        Creates the database file if it doesn't exist (for file-based DBs).
-        """
+        """Establish connection to the backend storage."""
         if self._connection is not None:
             return
 
-        try:
-            # Ensure parent directory exists for file-based databases
-            if self._db_path != ":memory:":
-                db_file = Path(self._db_path)
-                db_file.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure parent directory exists for file-based databases
+        if self._db_path != ":memory:":
+            db_file = Path(self._db_path)
+            db_file.parent.mkdir(parents=True, exist_ok=True)
 
-            self._connection = await aiosqlite.connect(self._db_path)
+        self._connection = await aiosqlite.connect(self._db_path)
 
-            # Enable WAL mode for better concurrent performance
-            await self._connection.execute("PRAGMA journal_mode=WAL")
+        # Enable WAL mode for better concurrent performance
+        await self._connection.execute("PRAGMA journal_mode=WAL")
+        await self._connection.execute("PRAGMA foreign_keys=ON")
 
-            # Enable foreign keys
-            await self._connection.execute("PRAGMA foreign_keys=ON")
+        # Create main memories table
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                memory_type TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                embedding TEXT,
+                metadata TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                thread_id TEXT,
+                parent_id TEXT
+            )
+        """)
 
-            await self._connection.commit()
+        # Create indexes
+        await self._connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memory_type
+            ON memories(memory_type)
+        """)
 
-            logger.info(f"Connected to SQLite database: {self._db_path}")
+        await self._connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_namespace
+            ON memories(namespace)
+        """)
 
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to connect to database: {e}") from e
+        await self._connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_created_at
+            ON memories(created_at)
+        """)
+
+        await self._connection.commit()
+
+        logger.info(f"Connected to SQLite database: {self._db_path}")
 
     async def disconnect(self) -> None:
-        """Close database connection."""
+        """Close connection to the backend storage."""
         if self._connection is not None:
-            try:
-                await self._connection.close()
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
-            finally:
-                self._connection = None
-                self._initialized_tables.clear()
+            await self._connection.close()
+            self._connection = None
 
-    def _namespace_to_table(self, namespace: tuple[str, ...]) -> str:
-        """Convert namespace tuple to valid table name.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-
-        Returns:
-            Valid SQLite table name
+    async def store(self, unit: MemoryUnit) -> str:
         """
-        # Join with double underscore and sanitize
-        name = "__".join(namespace)
-        # Replace any non-alphanumeric chars (except underscore) with underscore
-        safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name)
-        return f"mem_{safe_name}"
-
-    async def _ensure_table(self, namespace: tuple[str, ...]) -> str:
-        """Ensure table exists for namespace.
+        Store a memory unit and return its ID.
 
         Args:
-            namespace: Hierarchical namespace tuple
+            unit: The MemoryUnit to store.
 
         Returns:
-            Table name
+            The ID of the stored unit.
         """
         if self._connection is None:
-            raise SQLiteBackendError("Not connected to database")
+            raise RuntimeError("Not connected to database")
 
-        table_name = self._namespace_to_table(namespace)
+        # Serialize namespace and embedding
+        namespace_str = json.dumps(list(unit.namespace))
+        embedding_str = json.dumps(unit.embedding) if unit.embedding else None
+        metadata_str = json.dumps(unit.metadata)
 
-        if table_name in self._initialized_tables:
-            return table_name
+        await self._connection.execute(
+            """
+            INSERT OR REPLACE INTO memories
+            (id, content, memory_type, namespace, embedding, metadata,
+             created_at, updated_at, thread_id, parent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                unit.id,
+                unit.content,
+                unit.memory_type.value,
+                namespace_str,
+                embedding_str,
+                metadata_str,
+                unit.created_at.isoformat(),
+                unit.updated_at.isoformat(),
+                unit.thread_id,
+                unit.parent_id,
+            ),
+        )
 
-        try:
-            # Create main table with JSON value storage
-            await self._connection.execute(f"""
-                CREATE TABLE IF NOT EXISTS {table_name} (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    embedding TEXT,
-                    thread_id TEXT,
-                    timestamp TEXT,
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now'))
-                )
-            """)
+        await self._connection.commit()
+        return unit.id
 
-            # Create indexes for common query patterns
-            # B-tree index on thread_id for conversation filtering
-            await self._connection.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{table_name}_thread_id
-                ON {table_name}(thread_id)
-            """)
-
-            # B-tree index on timestamp for ordering
-            await self._connection.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{table_name}_timestamp
-                ON {table_name}(timestamp)
-            """)
-
-            # Index on created_at for chronological queries
-            await self._connection.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{table_name}_created_at
-                ON {table_name}(created_at)
-            """)
-
-            await self._connection.commit()
-            self._initialized_tables.add(table_name)
-
-            logger.debug(f"Initialized table: {table_name}")
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to create table {table_name}: {e}") from e
-
-        return table_name
-
-    async def write(
-        self,
-        namespace: tuple[str, ...],
-        key: str,
-        value: dict,
-        embedding: list[float] | None = None
-    ) -> str:
-        """Write a memory to storage.
+    async def get(self, memory_id: str) -> MemoryUnit | None:
+        """
+        Retrieve a memory unit by ID.
 
         Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier within namespace
-            value: Memory data
-            embedding: Optional embedding vector
+            memory_id: The ID of the memory to retrieve.
 
         Returns:
-            The key of the written memory
+            The MemoryUnit if found, None otherwise.
         """
-        table_name = await self._ensure_table(namespace)
+        if self._connection is None:
+            raise RuntimeError("Not connected to database")
 
-        try:
-            # Extract indexed fields from value
-            thread_id = value.get("thread_id")
-            timestamp = value.get("timestamp")
+        cursor = await self._connection.execute(
+            """
+            SELECT id, content, memory_type, namespace, embedding, metadata,
+                   created_at, updated_at, thread_id, parent_id
+            FROM memories
+            WHERE id = ?
+        """,
+            (memory_id,),
+        )
 
-            # Serialize value and embedding to JSON
-            value_json = json.dumps(value)
-            embedding_json = json.dumps(embedding) if embedding else None
+        row = await cursor.fetchone()
+        if row is None:
+            return None
 
-            await self._connection.execute(f"""
-                INSERT OR REPLACE INTO {table_name}
-                (key, value, embedding, thread_id, timestamp, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
-            """, (key, value_json, embedding_json, thread_id, timestamp))
-
-            await self._connection.commit()
-
-            return key
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to write memory: {e}") from e
-
-    async def read(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> dict | None:
-        """Read a single memory by key.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier
-
-        Returns:
-            Memory data if found, None otherwise
-        """
-        table_name = self._namespace_to_table(namespace)
-
-        # Check if table exists
-        if table_name not in self._initialized_tables:
-            # Try to check if table exists in database
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return None
-            self._initialized_tables.add(table_name)
-
-        try:
-            cursor = await self._connection.execute(
-                f"SELECT value FROM {table_name} WHERE key = ?",
-                (key,)
-            )
-            row = await cursor.fetchone()
-
-            if row is None:
-                return None
-
-            return json.loads(row[0])
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to read memory: {e}") from e
+        return self._row_to_unit(row)
 
     async def search(
         self,
-        namespace: tuple[str, ...],
-        query: str,
-        embedding: list[float] | None = None,
+        query_embedding: list[float],
+        memory_type: MemoryType | None = None,
+        namespace: tuple[str, ...] | None = None,
+        filters: dict[str, Any] | None = None,
         k: int = 10,
-        filters: dict | None = None
-    ) -> list[dict]:
-        """Search memories using text or embedding similarity.
-
-        If embedding is provided, uses cosine similarity.
-        Otherwise, uses LIKE-based text search on the JSON value.
+    ) -> list[MemoryUnit]:
+        """
+        Search for memory units by similarity.
 
         Args:
-            namespace: Hierarchical namespace tuple
-            query: Text query
-            embedding: Optional embedding vector
-            k: Maximum results
-            filters: Optional filters
+            query_embedding: The embedding vector to search with.
+            memory_type: Optional filter by memory type.
+            namespace: Optional filter by namespace prefix.
+            filters: Optional metadata filters.
+            k: Number of results to return.
 
         Returns:
-            List of matching memories ordered by relevance
+            List of matching MemoryUnit objects.
         """
-        table_name = self._namespace_to_table(namespace)
+        if self._connection is None:
+            raise RuntimeError("Not connected to database")
 
-        # Check if table exists
-        if table_name not in self._initialized_tables:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return []
-            self._initialized_tables.add(table_name)
+        # Build query conditions
+        conditions = []
+        params = []
 
-        try:
-            # Build filter conditions
-            conditions = []
-            params: list[Any] = []
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type.value)
 
+        if namespace:
+            # For namespace prefix matching, we check if stored namespace starts with prefix
+            namespace_str = json.dumps(list(namespace))
+            conditions.append("(namespace = ? OR namespace LIKE ?)")
+            params.append(namespace_str)
+            params.append(namespace_str[:-1] + ",%]")  # Match prefix
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        cursor = await self._connection.execute(
+            f"""
+            SELECT id, content, memory_type, namespace, embedding, metadata,
+                   created_at, updated_at, thread_id, parent_id
+            FROM memories
+            WHERE {where_clause}
+        """,
+            params,
+        )
+
+        rows = await cursor.fetchall()
+
+        # Calculate similarity scores
+        scored = []
+        for row in rows:
+            unit = self._row_to_unit(row)
+
+            # Apply metadata filters
             if filters:
-                for filter_key, filter_value in filters.items():
-                    # Use JSON extraction for filtering
-                    conditions.append(f"json_extract(value, '$.{filter_key}') = ?")
-                    params.append(filter_value)
+                if not all(unit.metadata.get(k) == v for k, v in filters.items()):
+                    continue
 
-            where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-            # If embedding provided, fetch all and calculate similarity in Python
-            if embedding is not None:
-                cursor = await self._connection.execute(
-                    f"SELECT key, value, embedding FROM {table_name} WHERE {where_clause}",
-                    params
-                )
-                rows = await cursor.fetchall()
-
-                # Calculate similarity scores
-                scored = []
-                for row in rows:
-                    key, value_json, embedding_json = row
-                    value = json.loads(value_json)
-
-                    if embedding_json:
-                        stored_embedding = json.loads(embedding_json)
-                        score = self._cosine_similarity(embedding, stored_embedding)
-                    else:
-                        score = 0.0
-
-                    scored.append((score, value))
-
-                # Sort by score descending
-                scored.sort(key=lambda x: x[0], reverse=True)
-                return [item[1] for item in scored[:k]]
-
-            # Text-based search using LIKE
-            if query:
-                conditions.append("value LIKE ?")
-                params.append(f"%{query}%")
-                where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-            cursor = await self._connection.execute(
-                f"SELECT value FROM {table_name} WHERE {where_clause} LIMIT ?",
-                params + [k]
-            )
-            rows = await cursor.fetchall()
-
-            return [json.loads(row[0]) for row in rows]
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to search memories: {e}") from e
-
-    async def list(
-        self,
-        namespace: tuple[str, ...],
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int | None = None
-    ) -> list[dict]:
-        """List memories with optional filtering and ordering.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            filters: Optional filters
-            order_by: Field to order by (prefix with - for descending)
-            limit: Maximum results
-
-        Returns:
-            List of memory dictionaries
-        """
-        table_name = self._namespace_to_table(namespace)
-
-        # Check if table exists
-        if table_name not in self._initialized_tables:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return []
-            self._initialized_tables.add(table_name)
-
-        try:
-            # Build query
-            conditions = []
-            params: list[Any] = []
-
-            if filters:
-                for filter_key, filter_value in filters.items():
-                    # Check if it's a top-level indexed column
-                    if filter_key in ("thread_id", "timestamp"):
-                        conditions.append(f"{filter_key} = ?")
-                    else:
-                        conditions.append(f"json_extract(value, '$.{filter_key}') = ?")
-                    params.append(filter_value)
-
-            where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-            # Build ORDER BY clause
-            order_clause = ""
-            if order_by:
-                descending = order_by.startswith("-")
-                field = order_by[1:] if descending else order_by
-                direction = "DESC" if descending else "ASC"
-
-                # Check if it's a top-level indexed column
-                if field in ("thread_id", "timestamp", "created_at", "updated_at"):
-                    order_clause = f"ORDER BY {field} {direction}"
-                else:
-                    order_clause = f"ORDER BY json_extract(value, '$.{field}') {direction}"
-
-            # Build LIMIT clause
-            limit_clause = f"LIMIT {limit}" if limit else ""
-
-            query = f"""
-                SELECT value FROM {table_name}
-                WHERE {where_clause}
-                {order_clause}
-                {limit_clause}
-            """
-
-            cursor = await self._connection.execute(query, params)
-            rows = await cursor.fetchall()
-
-            return [json.loads(row[0]) for row in rows]
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to list memories: {e}") from e
-
-    async def delete(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> bool:
-        """Delete a memory by key.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier
-
-        Returns:
-            True if deleted, False if not found
-        """
-        table_name = self._namespace_to_table(namespace)
-
-        # Check if table exists
-        if table_name not in self._initialized_tables:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return False
-            self._initialized_tables.add(table_name)
-
-        try:
-            cursor = await self._connection.execute(
-                f"DELETE FROM {table_name} WHERE key = ?",
-                (key,)
-            )
-            await self._connection.commit()
-
-            return cursor.rowcount > 0
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to delete memory: {e}") from e
-
-    async def update(
-        self,
-        namespace: tuple[str, ...],
-        key: str,
-        value: dict,
-        embedding: list[float] | None = None
-    ) -> bool:
-        """Update an existing memory.
-
-        Merges new value with existing data.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier
-            value: New data to merge
-            embedding: Optional new embedding
-
-        Returns:
-            True if updated, False if not found
-        """
-        table_name = self._namespace_to_table(namespace)
-
-        # Check if table exists
-        if table_name not in self._initialized_tables:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return False
-            self._initialized_tables.add(table_name)
-
-        try:
-            # Read existing value
-            cursor = await self._connection.execute(
-                f"SELECT value FROM {table_name} WHERE key = ?",
-                (key,)
-            )
-            row = await cursor.fetchone()
-
-            if row is None:
-                return False
-
-            # Merge values
-            existing = json.loads(row[0])
-            existing.update(value)
-
-            # Extract indexed fields
-            thread_id = existing.get("thread_id")
-            timestamp = existing.get("timestamp")
-
-            # Serialize
-            value_json = json.dumps(existing)
-
-            # Update with or without new embedding
-            if embedding is not None:
-                embedding_json = json.dumps(embedding)
-                await self._connection.execute(f"""
-                    UPDATE {table_name}
-                    SET value = ?, embedding = ?, thread_id = ?, timestamp = ?,
-                        updated_at = datetime('now')
-                    WHERE key = ?
-                """, (value_json, embedding_json, thread_id, timestamp, key))
+            # Calculate similarity
+            if unit.embedding and query_embedding:
+                similarity = self._cosine_similarity(query_embedding, unit.embedding)
             else:
-                await self._connection.execute(f"""
-                    UPDATE {table_name}
-                    SET value = ?, thread_id = ?, timestamp = ?,
-                        updated_at = datetime('now')
-                    WHERE key = ?
-                """, (value_json, thread_id, timestamp, key))
+                similarity = 0.0
 
-            await self._connection.commit()
+            scored.append((similarity, unit))
 
-            return True
+        # Sort by similarity descending and return top k
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [unit for _, unit in scored[:k]]
 
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to update memory: {e}") from e
-
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity score between -1 and 1
+    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
         """
-        if len(vec1) != len(vec2):
-            return 0.0
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = math.sqrt(sum(a * a for a in vec1))
-        norm2 = math.sqrt(sum(b * b for b in vec2))
-
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-
-        return dot_product / (norm1 * norm2)
-
-    # Utility methods
-
-    async def drop_namespace(self, namespace: tuple[str, ...]) -> bool:
-        """Drop a namespace table entirely.
-
-        WARNING: This permanently deletes all data in the namespace.
+        Update a memory unit.
 
         Args:
-            namespace: Hierarchical namespace tuple
+            memory_id: The ID of the memory to update.
+            updates: Dictionary of fields to update.
 
         Returns:
-            True if dropped, False if table didn't exist
+            True if updated successfully, False if not found.
         """
         if self._connection is None:
-            raise SQLiteBackendError("Not connected to database")
+            raise RuntimeError("Not connected to database")
 
-        table_name = self._namespace_to_table(namespace)
+        # Get existing unit
+        unit = await self.get(memory_id)
+        if unit is None:
+            return False
 
-        try:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return False
+        # Apply updates
+        if "content" in updates:
+            unit.content = updates["content"]
+        if "metadata" in updates:
+            unit.metadata.update(updates["metadata"])
+        if "embedding" in updates:
+            unit.embedding = updates["embedding"]
 
-            await self._connection.execute(f"DROP TABLE {table_name}")
-            await self._connection.commit()
+        unit.updated_at = datetime.now(UTC)
 
-            self._initialized_tables.discard(table_name)
+        # Store updated unit
+        await self.store(unit)
+        return True
 
-            return True
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to drop namespace: {e}") from e
-
-    async def get_namespace_count(self, namespace: tuple[str, ...]) -> int:
-        """Get count of memories in a namespace.
+    async def delete(self, memory_id: str) -> bool:
+        """
+        Delete a memory unit.
 
         Args:
-            namespace: Hierarchical namespace tuple
+            memory_id: The ID of the memory to delete.
 
         Returns:
-            Number of memories in namespace
-        """
-        table_name = self._namespace_to_table(namespace)
-
-        try:
-            cursor = await self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
-            )
-            if not await cursor.fetchone():
-                return 0
-
-            cursor = await self._connection.execute(
-                f"SELECT COUNT(*) FROM {table_name}"
-            )
-            row = await cursor.fetchone()
-            return row[0] if row else 0
-
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to get namespace count: {e}") from e
-
-    async def vacuum(self) -> None:
-        """Run VACUUM to reclaim space and optimize database.
-
-        Should be called periodically for databases with many deletions.
+            True if deleted successfully, False if not found.
         """
         if self._connection is None:
-            raise SQLiteBackendError("Not connected to database")
+            raise RuntimeError("Not connected to database")
 
-        try:
-            await self._connection.execute("VACUUM")
-        except Exception as e:
-            raise SQLiteBackendError(f"Failed to vacuum database: {e}") from e
+        cursor = await self._connection.execute(
+            """
+            DELETE FROM memories WHERE id = ?
+        """,
+            (memory_id,),
+        )
+
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
+    async def list_by_namespace(
+        self,
+        namespace: tuple[str, ...],
+        memory_type: MemoryType | None = None,
+        limit: int = 100,
+    ) -> list[MemoryUnit]:
+        """
+        List memory units by namespace prefix.
+
+        Args:
+            namespace: The namespace prefix to match.
+            memory_type: Optional filter by memory type.
+            limit: Maximum number of results.
+
+        Returns:
+            List of MemoryUnit objects.
+        """
+        if self._connection is None:
+            raise RuntimeError("Not connected to database")
+
+        conditions = []
+        params = []
+
+        # Namespace prefix matching
+        namespace_str = json.dumps(list(namespace))
+        conditions.append("(namespace = ? OR namespace LIKE ?)")
+        params.append(namespace_str)
+        params.append(namespace_str[:-1] + ",%]")  # Match prefix
+
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type.value)
+
+        where_clause = " AND ".join(conditions)
+        params.append(limit)
+
+        cursor = await self._connection.execute(
+            f"""
+            SELECT id, content, memory_type, namespace, embedding, metadata,
+                   created_at, updated_at, thread_id, parent_id
+            FROM memories
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ?
+        """,
+            params,
+        )
+
+        rows = await cursor.fetchall()
+        return [self._row_to_unit(row) for row in rows]
+
+    def _row_to_unit(self, row: tuple) -> MemoryUnit:
+        """
+        Convert a database row to a MemoryUnit.
+
+        Args:
+            row: Database row tuple.
+
+        Returns:
+            MemoryUnit object.
+        """
+        (
+            id_val,
+            content,
+            memory_type_str,
+            namespace_str,
+            embedding_str,
+            metadata_str,
+            created_at_str,
+            updated_at_str,
+            thread_id,
+            parent_id,
+        ) = row
+
+        return MemoryUnit(
+            id=id_val,
+            content=content,
+            memory_type=MemoryType(memory_type_str),
+            namespace=tuple(json.loads(namespace_str)),
+            embedding=json.loads(embedding_str) if embedding_str else None,
+            metadata=json.loads(metadata_str),
+            created_at=datetime.fromisoformat(created_at_str),
+            updated_at=datetime.fromisoformat(updated_at_str),
+            thread_id=thread_id,
+            parent_id=parent_id,
+        )
+
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        """
+        Calculate cosine similarity between two vectors.
+
+        Args:
+            a: First vector.
+            b: Second vector.
+
+        Returns:
+            Cosine similarity score.
+        """
+        if len(a) != len(b):
+            return 0.0
+
+        dot_product = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(x * x for x in b))
+
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+
+        return dot_product / (norm_a * norm_b)

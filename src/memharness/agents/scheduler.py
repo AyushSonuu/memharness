@@ -401,8 +401,7 @@ class AgentScheduler:
 
         # Return most recent first
         return [
-            r.to_dict() if isinstance(r, AgentResult) else r
-            for r in reversed(history[-limit:])
+            r.to_dict() if isinstance(r, AgentResult) else r for r in reversed(history[-limit:])
         ]
 
     def get_status(self) -> dict[str, Any]:

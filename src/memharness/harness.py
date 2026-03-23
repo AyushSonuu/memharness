@@ -36,6 +36,7 @@ from typing import (
 # Type Definitions
 # =============================================================================
 
+
 class MemoryType(str, Enum):
     """Enumeration of all supported memory types."""
 
@@ -69,6 +70,8 @@ class MemoryUnit:
         metadata: Additional key-value metadata.
         created_at: Timestamp when the memory was created.
         updated_at: Timestamp when the memory was last updated.
+        thread_id: Optional thread ID for conversational memories.
+        parent_id: Optional parent memory ID for hierarchical relationships.
     """
 
     content: str
@@ -79,6 +82,8 @@ class MemoryUnit:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    thread_id: str | None = None
+    parent_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the MemoryUnit to a dictionary."""
@@ -91,6 +96,8 @@ class MemoryUnit:
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "thread_id": self.thread_id,
+            "parent_id": self.parent_id,
         }
 
     @classmethod
@@ -103,8 +110,14 @@ class MemoryUnit:
             namespace=tuple(data.get("namespace", [])),
             embedding=data.get("embedding"),
             metadata=data.get("metadata", {}),
-            created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now(UTC)),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if isinstance(data.get("updated_at"), str) else data.get("updated_at", datetime.now(UTC)),
+            created_at=datetime.fromisoformat(data["created_at"])
+            if isinstance(data.get("created_at"), str)
+            else data.get("created_at", datetime.now(UTC)),
+            updated_at=datetime.fromisoformat(data["updated_at"])
+            if isinstance(data.get("updated_at"), str)
+            else data.get("updated_at", datetime.now(UTC)),
+            thread_id=data.get("thread_id"),
+            parent_id=data.get("parent_id"),
         )
 
     def to_json(self) -> str:
@@ -158,9 +171,12 @@ class MemharnessConfig:
         if file_path.suffix in (".yaml", ".yml"):
             try:
                 import yaml
+
                 data = yaml.safe_load(content)
             except ImportError:
-                raise ImportError("PyYAML is required to load YAML config files. Install with: pip install pyyaml")
+                raise ImportError(
+                    "PyYAML is required to load YAML config files. Install with: pip install pyyaml"
+                )
         else:
             data = json.loads(content)
 
@@ -224,6 +240,7 @@ class BackendProtocol(Protocol):
 # =============================================================================
 # In-Memory Backend Implementation
 # =============================================================================
+
 
 class InMemoryBackend:
     """
@@ -340,7 +357,7 @@ class InMemoryBackend:
         """Check if a namespace starts with the given prefix."""
         if len(prefix) > len(unit_ns):
             return False
-        return unit_ns[:len(prefix)] == prefix
+        return unit_ns[: len(prefix)] == prefix
 
     def _matches_filters(self, metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Check if metadata matches all filters."""
@@ -370,6 +387,7 @@ class InMemoryBackend:
 # Backend Factory
 # =============================================================================
 
+
 def _parse_backend(backend_uri: str) -> BackendProtocol:
     """
     Parse a backend URI and return the appropriate backend instance.
@@ -397,21 +415,21 @@ def _parse_backend(backend_uri: str) -> BackendProtocol:
         db_path = backend_uri[10:]  # Remove "sqlite:///"
         try:
             from memharness.backends.sqlite import SqliteBackend
+
             return SqliteBackend(db_path)
         except ImportError:
             raise ImportError(
-                "SqliteBackend is not available. "
-                "Ensure the sqlite backend module is installed."
+                "SqliteBackend is not available. Ensure the sqlite backend module is installed."
             )
 
     if backend_uri.startswith("postgresql://") or backend_uri.startswith("postgres://"):
         try:
             from memharness.backends.postgres import PostgresBackend
+
             return PostgresBackend(backend_uri)
         except ImportError:
             raise ImportError(
-                "PostgresBackend is not available. "
-                "Install with: pip install memharness[postgres]"
+                "PostgresBackend is not available. Install with: pip install memharness[postgres]"
             )
 
     raise ValueError(
@@ -423,6 +441,7 @@ def _parse_backend(backend_uri: str) -> BackendProtocol:
 # =============================================================================
 # Default Embedding Function
 # =============================================================================
+
 
 def _default_embedding_fn(text: str) -> list[float]:
     """
@@ -465,6 +484,7 @@ def _default_embedding_fn(text: str) -> list[float]:
 # =============================================================================
 # Main Harness Class
 # =============================================================================
+
 
 class MemoryHarness:
     """
@@ -563,6 +583,7 @@ class MemoryHarness:
         if file_path.suffix in (".yaml", ".yml"):
             try:
                 import yaml
+
                 data = yaml.safe_load(content)
             except ImportError:
                 raise ImportError("PyYAML required for YAML configs: pip install pyyaml")
@@ -616,6 +637,16 @@ class MemoryHarness:
     # Lifecycle Methods
     # =========================================================================
 
+    @property
+    def is_connected(self) -> bool:
+        """
+        Check if the harness is connected to the backend.
+
+        Returns:
+            True if connected, False otherwise.
+        """
+        return self._connected
+
     async def connect(self) -> None:
         """
         Establish connection to the backend.
@@ -653,6 +684,19 @@ class MemoryHarness:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    def _check_connected(self) -> None:
+        """
+        Check if the harness is connected to the backend.
+
+        Raises:
+            RuntimeError: If not connected to the backend.
+        """
+        if not self._connected:
+            raise RuntimeError(
+                "Not connected to backend. Call await harness.connect() first "
+                "or use the async context manager: async with MemoryHarness(...) as harness:"
+            )
 
     def _generate_id(self) -> str:
         """Generate a unique memory ID."""
@@ -724,6 +768,7 @@ class MemoryHarness:
             )
             ```
         """
+        self._check_connected()
         namespace = self._build_namespace(MemoryType.CONVERSATIONAL, thread_id)
         embedding = await self._embed(content)
 
@@ -851,7 +896,9 @@ class MemoryHarness:
         return await self._backend.search(
             query_embedding=query_embedding,
             memory_type=MemoryType.KNOWLEDGE,
-            namespace=self._namespace_prefix + (MemoryType.KNOWLEDGE.value,) if self._namespace_prefix else None,
+            namespace=self._namespace_prefix + (MemoryType.KNOWLEDGE.value,)
+            if self._namespace_prefix
+            else None,
             filters=filters,
             k=k,
         )
@@ -990,7 +1037,7 @@ class MemoryHarness:
         namespace = self._build_namespace(MemoryType.WORKFLOW)
 
         # Create searchable content
-        steps_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+        steps_text = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(steps))
         content = f"Task: {task}\nSteps:\n{steps_text}\nOutcome: {outcome}"
         if result:
             content += f"\nResult: {result}"
@@ -1227,11 +1274,13 @@ class MemoryHarness:
             server = tool.metadata.get("server", "")
 
             if regex.search(name) or regex.search(desc):
-                results.append({
-                    "server": server,
-                    "name": name,
-                    "description": desc,
-                })
+                results.append(
+                    {
+                        "server": server,
+                        "name": name,
+                        "description": desc,
+                    }
+                )
 
         return results
 
@@ -1881,6 +1930,47 @@ class MemoryHarness:
         """
         return await self._backend.delete(memory_id)
 
+    async def clear_all(self) -> int:
+        """
+        Clear all memories from the backend.
+
+        This method removes all stored memories. Use with caution!
+
+        Returns:
+            The number of memories deleted.
+
+        Example:
+            ```python
+            count = await harness.clear_all()
+            print(f"Deleted {count} memories")
+            ```
+        """
+        # For in-memory backend, we can directly clear storage
+        if hasattr(self._backend, "_storage"):
+            count = len(self._backend._storage)
+            self._backend._storage.clear()
+            return count
+
+        # For other backends, we need to list and delete all memories
+        # This is inefficient but works for all backend types
+        count = 0
+        for memory_type in MemoryType:
+            namespace = (
+                self._namespace_prefix + (memory_type.value,)
+                if self._namespace_prefix
+                else (memory_type.value,)
+            )
+            memories = await self._backend.list_by_namespace(
+                namespace=namespace,
+                memory_type=memory_type,
+                limit=100000,  # Large limit to get all
+            )
+            for memory in memories:
+                await self._backend.delete(memory.id)
+                count += 1
+
+        return count
+
     # =========================================================================
     # Context Assembly
     # =========================================================================
@@ -1945,9 +2035,7 @@ class MemoryHarness:
         if estimated_tokens < max_tokens:
             knowledge = await self.search_knowledge(query, k=3)
             if knowledge:
-                kb_text = "\n\n".join(
-                    f"- {k.content}" for k in knowledge
-                )
+                kb_text = "\n\n".join(f"- {k.content}" for k in knowledge)
                 sections.append(f"## Relevant Knowledge\n{kb_text}")
                 estimated_tokens += len(kb_text) // chars_per_token
 
@@ -1956,8 +2044,7 @@ class MemoryHarness:
             entities = await self.search_entity(query, k=3)
             if entities:
                 ent_text = "\n".join(
-                    f"- {e.metadata.get('name', 'Unknown')}: {e.content}"
-                    for e in entities
+                    f"- {e.metadata.get('name', 'Unknown')}: {e.content}" for e in entities
                 )
                 sections.append(f"## Related Entities\n{ent_text}")
                 estimated_tokens += len(ent_text) // chars_per_token
@@ -1967,8 +2054,7 @@ class MemoryHarness:
             workflows = await self.search_workflow(query, k=2)
             if workflows:
                 wf_text = "\n\n".join(
-                    f"**{w.metadata.get('task', 'Task')}**\n{w.content}"
-                    for w in workflows
+                    f"**{w.metadata.get('task', 'Task')}**\n{w.content}" for w in workflows
                 )
                 sections.append(f"## Relevant Workflows\n{wf_text}")
                 estimated_tokens += len(wf_text) // chars_per_token
@@ -2019,24 +2105,21 @@ class MemoryHarness:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            },
+                            "query": {"type": "string", "description": "The search query"},
                             "memory_type": {
                                 "type": "string",
                                 "enum": [t.value for t in MemoryType],
-                                "description": "Optional filter by memory type"
+                                "description": "Optional filter by memory type",
                             },
                             "k": {
                                 "type": "integer",
                                 "description": "Number of results (default 5)",
-                                "default": 5
-                            }
+                                "default": 5,
+                            },
                         },
-                        "required": ["query"]
-                    }
-                }
+                        "required": ["query"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2048,12 +2131,12 @@ class MemoryHarness:
                         "properties": {
                             "memory_id": {
                                 "type": "string",
-                                "description": "The memory ID to retrieve"
+                                "description": "The memory ID to retrieve",
                             }
                         },
-                        "required": ["memory_id"]
-                    }
-                }
+                        "required": ["memory_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2063,23 +2146,17 @@ class MemoryHarness:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "content": {
-                                "type": "string",
-                                "description": "The content to remember"
-                            },
+                            "content": {"type": "string", "description": "The content to remember"},
                             "memory_type": {
                                 "type": "string",
                                 "enum": [t.value for t in MemoryType],
-                                "description": "Type of memory (default: knowledge)"
+                                "description": "Type of memory (default: knowledge)",
                             },
-                            "metadata": {
-                                "type": "object",
-                                "description": "Optional metadata"
-                            }
+                            "metadata": {"type": "object", "description": "Optional metadata"},
                         },
-                        "required": ["content"]
-                    }
-                }
+                        "required": ["content"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2092,11 +2169,11 @@ class MemoryHarness:
                             "path": {
                                 "type": "string",
                                 "description": "Path to start from (default: /)",
-                                "default": "/"
+                                "default": "/",
                             }
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2108,12 +2185,12 @@ class MemoryHarness:
                         "properties": {
                             "tool_path": {
                                 "type": "string",
-                                "description": "Path to tool in format: server/tool_name"
+                                "description": "Path to tool in format: server/tool_name",
                             }
                         },
-                        "required": ["tool_path"]
-                    }
-                }
+                        "required": ["tool_path"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2125,12 +2202,12 @@ class MemoryHarness:
                         "properties": {
                             "summary_id": {
                                 "type": "string",
-                                "description": "The summary memory ID to expand"
+                                "description": "The summary memory ID to expand",
                             }
                         },
-                        "required": ["summary_id"]
-                    }
-                }
+                        "required": ["summary_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -2142,16 +2219,16 @@ class MemoryHarness:
                         "properties": {
                             "thread_id": {
                                 "type": "string",
-                                "description": "The conversation thread ID"
+                                "description": "The conversation thread ID",
                             },
                             "limit": {
                                 "type": "integer",
                                 "description": "Maximum messages to retrieve (default 20)",
-                                "default": 20
-                            }
+                                "default": 20,
+                            },
                         },
-                        "required": ["thread_id"]
-                    }
-                }
+                        "required": ["thread_id"],
+                    },
+                },
             },
         ]

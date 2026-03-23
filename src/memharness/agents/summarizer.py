@@ -86,9 +86,7 @@ class SummarizerAgent(EmbeddedAgent):
 
             for thread_info in threads:
                 try:
-                    messages = await self._get_thread_messages(
-                        thread_info["thread_id"], namespace
-                    )
+                    messages = await self._get_thread_messages(thread_info["thread_id"], namespace)
 
                     if not force and len(messages) < self.config.summarizer_threshold_messages:
                         continue
@@ -163,9 +161,7 @@ class SummarizerAgent(EmbeddedAgent):
         # For now, return empty - actual implementation depends on backend
         try:
             # Query conversational memories to find distinct threads
-            cutoff = datetime.now() - timedelta(
-                hours=self.config.summarizer_max_age_hours
-            )
+            cutoff = datetime.now() - timedelta(hours=self.config.summarizer_max_age_hours)
             # Would call memory.search() or similar to find threads
             return []
         except Exception:
@@ -194,8 +190,7 @@ class SummarizerAgent(EmbeddedAgent):
         """Create an abstractive summary using LLM."""
         # Format messages for LLM
         formatted = "\n".join(
-            f"[{m.get('role', 'unknown')}]: {m.get('content', '')}"
-            for m in messages
+            f"[{m.get('role', 'unknown')}]: {m.get('content', '')}" for m in messages
         )
 
         prompt = f"""Summarize the following conversation. Capture:
@@ -264,9 +259,20 @@ Summary:"""
 
             # Decision/conclusion indicators
             decision_words = [
-                "decided", "agreed", "conclusion", "summary", "result",
-                "solution", "answer", "resolved", "confirmed", "will do",
-                "action", "next step", "todo", "deadline",
+                "decided",
+                "agreed",
+                "conclusion",
+                "summary",
+                "result",
+                "solution",
+                "answer",
+                "resolved",
+                "confirmed",
+                "will do",
+                "action",
+                "next step",
+                "todo",
+                "deadline",
             ]
             for word in decision_words:
                 if word in content_lower:

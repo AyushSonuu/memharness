@@ -147,9 +147,21 @@ def sample_conversation():
 def sample_knowledge():
     """Return sample knowledge base entries."""
     return [
-        {"content": "Python is a high-level programming language", "source": "docs", "tags": ["python", "programming"]},
-        {"content": "Kubernetes orchestrates containers", "source": "docs", "tags": ["k8s", "containers"]},
-        {"content": "Docker packages applications in containers", "source": "wiki", "tags": ["docker", "containers"]},
+        {
+            "content": "Python is a high-level programming language",
+            "source": "docs",
+            "tags": ["python", "programming"],
+        },
+        {
+            "content": "Kubernetes orchestrates containers",
+            "source": "docs",
+            "tags": ["k8s", "containers"],
+        },
+        {
+            "content": "Docker packages applications in containers",
+            "source": "wiki",
+            "tags": ["docker", "containers"],
+        },
     ]
 
 
@@ -167,10 +179,30 @@ def sample_entities():
 def sample_tools():
     """Return sample tool definitions."""
     return [
-        {"namespace": "github", "name": "create_pr", "description": "Create pull request", "schema": {"title": "string", "body": "string"}},
-        {"namespace": "github", "name": "list_issues", "description": "List repository issues", "schema": {"repo": "string", "state": "string"}},
-        {"namespace": "slack", "name": "send_message", "description": "Send Slack message", "schema": {"channel": "string", "text": "string"}},
-        {"namespace": "jira", "name": "create_ticket", "description": "Create Jira ticket", "schema": {"project": "string", "summary": "string"}},
+        {
+            "namespace": "github",
+            "name": "create_pr",
+            "description": "Create pull request",
+            "schema": {"title": "string", "body": "string"},
+        },
+        {
+            "namespace": "github",
+            "name": "list_issues",
+            "description": "List repository issues",
+            "schema": {"repo": "string", "state": "string"},
+        },
+        {
+            "namespace": "slack",
+            "name": "send_message",
+            "description": "Send Slack message",
+            "schema": {"channel": "string", "text": "string"},
+        },
+        {
+            "namespace": "jira",
+            "name": "create_ticket",
+            "description": "Create Jira ticket",
+            "schema": {"project": "string", "summary": "string"},
+        },
     ]
 
 
@@ -178,9 +210,21 @@ def sample_tools():
 def sample_workflows():
     """Return sample workflow data."""
     return [
-        {"name": "Deploy Application", "steps": ["build", "test", "deploy", "notify"], "status": "success"},
-        {"name": "Run Tests", "steps": ["lint", "unit-test", "integration-test"], "status": "success"},
-        {"name": "Release Process", "steps": ["tag", "build", "publish", "announce"], "status": "pending"},
+        {
+            "name": "Deploy Application",
+            "steps": ["build", "test", "deploy", "notify"],
+            "status": "success",
+        },
+        {
+            "name": "Run Tests",
+            "steps": ["lint", "unit-test", "integration-test"],
+            "status": "success",
+        },
+        {
+            "name": "Release Process",
+            "steps": ["tag", "build", "publish", "announce"],
+            "status": "pending",
+        },
     ]
 
 
@@ -214,16 +258,12 @@ async def populated_memory(memory, sample_conversation, sample_knowledge, sample
 @pytest.fixture
 def memory_unit_factory():
     """Factory fixture for creating MemoryUnit instances."""
+
     def create(
-        content: str = "test content",
-        memory_type: MemoryType = MemoryType.KNOWLEDGE,
-        **kwargs
+        content: str = "test content", memory_type: MemoryType = MemoryType.KNOWLEDGE, **kwargs
     ) -> MemoryUnit:
-        return MemoryUnit(
-            content=content,
-            memory_type=memory_type,
-            **kwargs
-        )
+        return MemoryUnit(content=content, memory_type=memory_type, **kwargs)
+
     return create
 
 
@@ -237,15 +277,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "postgres: marks tests requiring PostgreSQL"
-    )
-    config.addinivalue_line(
-        "markers", "integration: marks integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "agents: marks tests for AI agent functionality"
-    )
+    config.addinivalue_line("markers", "postgres: marks tests requiring PostgreSQL")
+    config.addinivalue_line("markers", "integration: marks integration tests")
+    config.addinivalue_line("markers", "agents: marks tests for AI agent functionality")
 
 
 def pytest_collection_modifyitems(config, items):

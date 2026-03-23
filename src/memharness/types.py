@@ -149,18 +149,12 @@ class MemoryUnit(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Arbitrary key-value metadata"
     )
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Creation timestamp"
-    )
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
     updated_at: datetime = Field(
         default_factory=datetime.utcnow, description="Last update timestamp"
     )
-    expires_at: datetime | None = Field(
-        default=None, description="Optional TTL expiration"
-    )
-    score: float | None = Field(
-        default=None, description="Relevance score from retrieval"
-    )
+    expires_at: datetime | None = Field(default=None, description="Optional TTL expiration")
+    score: float | None = Field(default=None, description="Relevance score from retrieval")
     source_ids: list[UUID] | None = Field(
         default=None, description="Source memory IDs (for summaries)"
     )
@@ -198,9 +192,7 @@ class MemoryUnit(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
     def __repr__(self) -> str:
-        content_preview = (
-            self.content[:50] + "..." if len(self.content) > 50 else self.content
-        )
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
         return (
             f"MemoryUnit(id={str(self.id)[:8]}, type={self.memory_type.value}, "
             f"ns={self.namespace!r}, content={content_preview!r})"

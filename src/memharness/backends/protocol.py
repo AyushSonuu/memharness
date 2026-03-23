@@ -4,6 +4,8 @@
 
 """Backend protocol definition for storage backends."""
 
+from __future__ import annotations
+
 from typing import Protocol, runtime_checkable
 
 
@@ -32,7 +34,7 @@ class BackendProtocol(Protocol):
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: list[float] | None = None
+        embedding: list[float] | None = None,
     ) -> str:
         """Write a memory to storage.
 
@@ -50,11 +52,7 @@ class BackendProtocol(Protocol):
         """
         ...
 
-    async def read(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> dict | None:
+    async def read(self, namespace: tuple[str, ...], key: str) -> dict | None:
         """Read a single memory by key.
 
         Args:
@@ -75,7 +73,7 @@ class BackendProtocol(Protocol):
         query: str,
         embedding: list[float] | None = None,
         k: int = 10,
-        filters: dict | None = None
+        filters: dict | None = None,
     ) -> list[dict]:
         """Search memories using text query or embedding similarity.
 
@@ -99,7 +97,7 @@ class BackendProtocol(Protocol):
         namespace: tuple[str, ...],
         filters: dict | None = None,
         order_by: str | None = None,
-        limit: int | None = None
+        limit: int | None = None,
     ) -> list[dict]:
         """List memories in a namespace with optional filtering.
 
@@ -117,11 +115,7 @@ class BackendProtocol(Protocol):
         """
         ...
 
-    async def delete(
-        self,
-        namespace: tuple[str, ...],
-        key: str
-    ) -> bool:
+    async def delete(self, namespace: tuple[str, ...], key: str) -> bool:
         """Delete a memory by key.
 
         Args:
@@ -141,7 +135,7 @@ class BackendProtocol(Protocol):
         namespace: tuple[str, ...],
         key: str,
         value: dict,
-        embedding: list[float] | None = None
+        embedding: list[float] | None = None,
     ) -> bool:
         """Update an existing memory.
 

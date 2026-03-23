@@ -744,10 +744,10 @@ class PostgresBackend:
             )
 
             query = f"""
-                INSERT INTO {table_name} ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
+                INSERT INTO {table_name} ({", ".join(columns)})
+                VALUES ({", ".join(placeholders)})
                 ON CONFLICT (key) DO UPDATE SET
-                    {', '.join(f'{col} = EXCLUDED.{col}' for col in columns if col != 'key')},
+                    {", ".join(f"{col} = EXCLUDED.{col}" for col in columns if col != "key")},
                     updated_at = NOW()
                 RETURNING id
             """
@@ -783,7 +783,9 @@ class PostgresBackend:
         # Base columns present in all tables
         columns = ["key", "namespace", "content", "metadata"]
         content = value.get("content", "")
-        metadata = {k: v for k, v in value.items() if k not in self._get_reserved_fields(memory_type)}
+        metadata = {
+            k: v for k, v in value.items() if k not in self._get_reserved_fields(memory_type)
+        }
 
         values: list[Any] = [
             key,
@@ -1036,9 +1038,7 @@ class PostgresBackend:
                 )
 
             # Text-based search fallback
-            return await self._text_search(
-                table_name, memory_type, query, k, where_clauses, params
-            )
+            return await self._text_search(table_name, memory_type, query, k, where_clauses, params)
 
         except Exception as e:
             raise PostgresBackendError(f"Failed to search memories: {e}") from e
@@ -1070,7 +1070,7 @@ class PostgresBackend:
             SELECT *, (embedding <=> $1) AS distance
             FROM {table_name}
             WHERE embedding IS NOT NULL
-            {f'AND {" AND ".join(adjusted_clauses)}' if adjusted_clauses else ''}
+            {f"AND {' AND '.join(adjusted_clauses)}" if adjusted_clauses else ""}
             ORDER BY distance
             LIMIT {k}
         """
@@ -1166,7 +1166,9 @@ class PostgresBackend:
 
         try:
             # Build filter conditions
-            where_clauses, filter_params = self._build_filter_clauses(memory_type, namespace, filters)
+            where_clauses, filter_params = self._build_filter_clauses(
+                memory_type, namespace, filters
+            )
 
             # Parameters: $1 = embedding, $2 = keyword_query
             params = [embedding, query] + filter_params
@@ -1373,7 +1375,7 @@ class PostgresBackend:
 
             sql = f"""
                 UPDATE {table_name}
-                SET {', '.join(set_parts)}
+                SET {", ".join(set_parts)}
                 WHERE key = ${param_idx}
             """
 

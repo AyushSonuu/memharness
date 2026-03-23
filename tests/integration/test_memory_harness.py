@@ -5,7 +5,6 @@ Tests the complete memory harness functionality including all memory types,
 search operations, and context assembly.
 """
 
-
 import pytest
 
 from memharness import MemoryHarness
@@ -75,7 +74,7 @@ class TestConversationalMemory:
             "t1",
             "user",
             "Hello with metadata",
-            metadata={"source": "api", "timestamp": "2024-01-01"}
+            metadata={"source": "api", "timestamp": "2024-01-01"},
         )
 
         messages = await memory.get_conversational("t1")
@@ -107,10 +106,7 @@ class TestKnowledgeBase:
     @pytest.mark.asyncio
     async def test_add_knowledge(self, memory):
         """Test adding knowledge to the base."""
-        kb_id = await memory.add_knowledge(
-            "Python is a programming language",
-            source="docs"
-        )
+        kb_id = await memory.add_knowledge("Python is a programming language", source="docs")
 
         assert kb_id is not None
 
@@ -118,10 +114,7 @@ class TestKnowledgeBase:
     async def test_search_knowledge(self, memory):
         """Test searching the knowledge base."""
         # Write
-        kb_id = await memory.add_knowledge(
-            "Python is a programming language",
-            source="docs"
-        )
+        kb_id = await memory.add_knowledge("Python is a programming language", source="docs")
 
         # Search
         results = await memory.search_knowledge("programming", k=1)
@@ -149,7 +142,7 @@ class TestKnowledgeBase:
         await memory.add_knowledge(
             "Kubernetes orchestrates containers",
             source="docs",
-            metadata={"tags": ["k8s", "devops", "containers"]}
+            metadata={"tags": ["k8s", "devops", "containers"]},
         )
 
         results = await memory.search_knowledge("container management", k=1)
@@ -212,17 +205,14 @@ class TestEntityMemory:
         """Test entity relationships (if supported)."""
         try:
             await memory.add_entity(
-                "John Doe",
-                "PERSON",
-                "Works at Acme",
-                relationships={"works_at": "Acme Corp"}
+                "John Doe", "PERSON", "Works at Acme", relationships={"works_at": "Acme Corp"}
             )
 
             await memory.add_entity(
                 "Acme Corp",
                 "ORGANIZATION",
                 "Technology company",
-                relationships={"employees": ["John Doe"]}
+                relationships={"employees": ["John Doe"]},
             )
 
             # Verify relationships are stored
@@ -244,11 +234,7 @@ class TestWorkflowMemory:
     @pytest.mark.asyncio
     async def test_add_workflow(self, memory):
         """Test adding a workflow."""
-        await memory.add_workflow(
-            "Deploy app",
-            ["build", "test", "deploy"],
-            "success"
-        )
+        await memory.add_workflow("Deploy app", ["build", "test", "deploy"], "success")
 
         results = await memory.search_workflow("deployment")
         assert len(results) >= 1
@@ -301,9 +287,7 @@ class TestSummaryExpansion:
 
         # Create summary
         summary_id = await memory.add_summary(
-            "User said Message 1, assistant responded",
-            source_ids=[id1, id2],
-            thread_id="t1"
+            "User said Message 1, assistant responded", source_ids=[id1, id2], thread_id="t1"
         )
 
         assert summary_id is not None
@@ -317,9 +301,7 @@ class TestSummaryExpansion:
 
         # Create summary
         summary_id = await memory.add_summary(
-            "User said Message 1, assistant responded",
-            source_ids=[id1, id2],
-            thread_id="t1"
+            "User said Message 1, assistant responded", source_ids=[id1, id2], thread_id="t1"
         )
 
         # Expand
@@ -332,16 +314,12 @@ class TestSummaryExpansion:
         ids = []
         for i in range(5):
             msg_id = await memory.add_conversational(
-                "t1",
-                "user" if i % 2 == 0 else "assistant",
-                f"Message {i}"
+                "t1", "user" if i % 2 == 0 else "assistant", f"Message {i}"
             )
             ids.append(msg_id)
 
         summary_id = await memory.add_summary(
-            "Conversation summary",
-            source_ids=ids,
-            thread_id="t1"
+            "Conversation summary", source_ids=ids, thread_id="t1"
         )
 
         originals = await memory.expand_summary(summary_id)
@@ -363,10 +341,7 @@ class TestToolboxVFS:
     async def test_add_tool(self, memory):
         """Test adding a tool to the toolbox."""
         await memory.add_tool(
-            "github",
-            "create_pr",
-            "Create pull request",
-            {"title": "string", "body": "string"}
+            "github", "create_pr", "Create pull request", {"title": "string", "body": "string"}
         )
 
         tree = await memory.toolbox_tree()
@@ -469,7 +444,9 @@ class TestContextAssembly:
         context = await memory.assemble_context("kubernetes deployment", "t1")
 
         # Kubernetes-related content should be included
-        assert "Kubernetes" in context or "kubernetes" in context.lower() or "k8s" in context.lower()
+        assert (
+            "Kubernetes" in context or "kubernetes" in context.lower() or "k8s" in context.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_context_thread_specific(self, memory):
@@ -510,7 +487,7 @@ class TestToolLog:
                 input_params={"title": "Fix bug", "body": "Description"},
                 output_result={"pr_number": 123, "url": "https://github.com/..."},
                 success=True,
-                duration_ms=500
+                duration_ms=500,
             )
 
             assert log_id is not None
@@ -525,7 +502,7 @@ class TestToolLog:
                 tool_name="github.create_pr",
                 input_params={"title": "Test PR"},
                 output_result={"pr_number": 1},
-                success=True
+                success=True,
             )
 
             logs = await memory.search_tool_logs("github")
@@ -550,7 +527,7 @@ class TestSkillsMemory:
                 name="python_debugging",
                 description="Debug Python applications using pdb",
                 examples=["import pdb; pdb.set_trace()", "breakpoint()"],
-                category="development"
+                category="development",
             )
 
             assert skill_id is not None
@@ -562,10 +539,7 @@ class TestSkillsMemory:
         """Test searching learned skills."""
         try:
             await memory.add_skill(
-                name="debugging",
-                description="Debug applications",
-                examples=["pdb"],
-                category="dev"
+                name="debugging", description="Debug applications", examples=["pdb"], category="dev"
             )
 
             results = await memory.search_skills("debug")
@@ -589,7 +563,7 @@ class TestFileMemory:
             file_id = await memory.add_file(
                 path="/path/to/file.py",
                 content_summary="Python module for data processing",
-                metadata={"lines": 100, "language": "python"}
+                metadata={"lines": 100, "language": "python"},
             )
 
             assert file_id is not None
@@ -602,7 +576,7 @@ class TestFileMemory:
         try:
             await memory.add_file(
                 path="/project/utils/helpers.py",
-                content_summary="Utility functions for string manipulation"
+                content_summary="Utility functions for string manipulation",
             )
 
             results = await memory.search_files("string utility")
@@ -627,7 +601,7 @@ class TestPersonaMemory:
                 name="Technical Expert",
                 traits=["concise", "technical", "helpful"],
                 communication_style="professional",
-                domain_expertise=["python", "devops", "cloud"]
+                domain_expertise=["python", "devops", "cloud"],
             )
 
             assert persona_id is not None
@@ -639,9 +613,7 @@ class TestPersonaMemory:
         """Test retrieving active persona."""
         try:
             await memory.set_persona(
-                name="Expert",
-                traits=["helpful"],
-                communication_style="friendly"
+                name="Expert", traits=["helpful"], communication_style="friendly"
             )
 
             persona = await memory.get_active_persona()

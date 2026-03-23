@@ -30,23 +30,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Union
 
-from memharness.backends.memory import InMemoryBackend
 from memharness.backends.protocol import BackendProtocol
-from memharness.backends.sqlite import SQLiteBackend, SQLiteBackendError
+from memharness.backends.sqlite import SqliteBackend
+
+# Import InMemoryBackend from harness since it's already there
+from memharness.harness import InMemoryBackend
 
 if TYPE_CHECKING:
     pass
 
 __all__ = [
     "BackendProtocol",
-    "SQLiteBackend",
-    "SQLiteBackendError",
+    "SqliteBackend",
     "InMemoryBackend",
     "get_backend",
 ]
 
 
-def get_backend(connection_string: str) -> SQLiteBackend | InMemoryBackend:
+def get_backend(connection_string: str) -> SqliteBackend | InMemoryBackend:
     """Get the appropriate backend based on connection string.
 
     Args:
@@ -66,19 +67,20 @@ def get_backend(connection_string: str) -> SQLiteBackend | InMemoryBackend:
     """
     if connection_string.startswith("postgresql://") or connection_string.startswith("postgres://"):
         from memharness.backends.postgres import PostgresBackend
+
         return PostgresBackend(connection_string)
 
     elif connection_string.startswith("sqlite:///"):
         # Extract path from sqlite:///path format
         db_path = connection_string[10:]  # Remove "sqlite:///"
         if db_path == ":memory:":
-            return SQLiteBackend(":memory:")
-        return SQLiteBackend(db_path)
+            return SqliteBackend(":memory:")
+        return SqliteBackend(db_path)
 
     elif connection_string.startswith("sqlite://"):
         # Handle sqlite://:memory: format
         db_path = connection_string[9:]  # Remove "sqlite://"
-        return SQLiteBackend(db_path if db_path else ":memory:")
+        return SqliteBackend(db_path if db_path else ":memory:")
 
     elif connection_string == ":memory:":
         # Simple in-memory backend for testing
@@ -92,5 +94,6 @@ def get_backend(connection_string: str) -> SQLiteBackend | InMemoryBackend:
 def __getattr__(name: str):
     if name == "PostgresBackend":
         from memharness.backends.postgres import PostgresBackend
+
         return PostgresBackend
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

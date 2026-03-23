@@ -4,7 +4,6 @@ Unit tests for memharness configuration.
 Tests Config class, YAML loading, and duration parsing.
 """
 
-
 import pytest
 
 from memharness import Config, MemharnessConfig
@@ -302,7 +301,7 @@ class TestDurationParsing:
 
             duration = parse_duration("never")
             # 'never' typically means None or infinity
-            assert duration is None or duration == float('inf')
+            assert duration is None or duration == float("inf")
         except (ImportError, ValueError):
             pytest.skip("'never' duration not supported")
 
@@ -507,4 +506,4 @@ memory:
         if hasattr(config, "memory") and hasattr(config.memory, "retention"):
             retention = config.memory.retention
             if hasattr(retention, "knowledge"):
-                assert retention.knowledge in [None, "never", float('inf')]
+                assert retention.knowledge in [None, "never", float("inf")]

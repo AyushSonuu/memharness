@@ -132,9 +132,7 @@ class GCAgent(EmbeddedAgent):
                             orphans_cleaned += 1
 
                     except Exception as e:
-                        errors.append(
-                            f"{target.action.value} {target.memory_id}: {str(e)}"
-                        )
+                        errors.append(f"{target.action.value} {target.memory_id}: {str(e)}")
 
             result = await self._create_result(
                 success=len(errors) == 0,

@@ -63,9 +63,7 @@ _DURATION_UNITS: dict[str, int] = {
 }
 
 # Pattern for parsing duration strings
-_DURATION_PATTERN = re.compile(
-    r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$", re.IGNORECASE
-)
+_DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$", re.IGNORECASE)
 
 
 def parse_duration(duration_str: str) -> timedelta:
@@ -111,9 +109,7 @@ def parse_duration(duration_str: str) -> timedelta:
 
     if unit_lower not in _DURATION_UNITS:
         valid_units = ", ".join(sorted(set(_DURATION_UNITS.keys())))
-        raise DurationParseError(
-            f"Unknown duration unit: {unit!r}. Valid units: {valid_units}"
-        )
+        raise DurationParseError(f"Unknown duration unit: {unit!r}. Valid units: {valid_units}")
 
     seconds = value * _DURATION_UNITS[unit_lower]
     return timedelta(seconds=seconds)

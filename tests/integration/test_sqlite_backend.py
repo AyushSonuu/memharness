@@ -155,9 +155,7 @@ class TestSQLitePersistence:
         id1 = await harness1.add_conversational("t1", "user", "Message 1")
         id2 = await harness1.add_conversational("t1", "assistant", "Response 1")
         summary_id = await harness1.add_summary(
-            "Summary of conversation",
-            source_ids=[id1, id2],
-            thread_id="t1"
+            "Summary of conversation", source_ids=[id1, id2], thread_id="t1"
         )
 
         await harness1.disconnect()

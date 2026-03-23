@@ -20,7 +20,8 @@ class ConversationalConfig(BaseModel):
         default=1000, ge=1, description="Maximum messages allowed per conversation thread"
     )
     default_ttl: str | None = Field(
-        default=None, description="Default TTL for messages (e.g., '7d', '24h'). None means no expiry"
+        default=None,
+        description="Default TTL for messages (e.g., '7d', '24h'). None means no expiry",
     )
     auto_summarize_threshold: int = Field(
         default=50, ge=1, description="Number of messages after which auto-summarization triggers"
@@ -42,8 +43,12 @@ class SummarizationConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(default=True, description="Whether summarization is enabled")
-    triggers: list[SummarizationTrigger] = Field(default_factory=list, description="Trigger conditions")
-    keep_originals: bool = Field(default=True, description="Keep original memories after summarization")
+    triggers: list[SummarizationTrigger] = Field(
+        default_factory=list, description="Trigger conditions"
+    )
+    keep_originals: bool = Field(
+        default=True, description="Keep original memories after summarization"
+    )
     originals_ttl: str = Field(default="365d", description="TTL for originals after summarization")
 
 
@@ -53,7 +58,9 @@ class ConsolidationConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(default=True, description="Whether consolidation is enabled")
-    schedule: str = Field(default="0 3 * * *", description="Cron expression for consolidation schedule")
+    schedule: str = Field(
+        default="0 3 * * *", description="Cron expression for consolidation schedule"
+    )
     similarity_threshold: float = Field(
         default=0.9, ge=0.0, le=1.0, description="Similarity threshold for duplicate detection"
     )
@@ -66,8 +73,12 @@ class GCConfig(BaseModel):
 
     enabled: bool = Field(default=True, description="Whether garbage collection is enabled")
     schedule: str = Field(default="0 4 * * 0", description="Cron expression for GC schedule")
-    archive_after: str = Field(default="90d", description="Duration after which memories are archived")
-    delete_after: str = Field(default="365d", description="Duration after which archived memories are deleted")
+    archive_after: str = Field(
+        default="90d", description="Duration after which memories are archived"
+    )
+    delete_after: str = Field(
+        default="365d", description="Duration after which archived memories are deleted"
+    )
 
 
 class EntityExtractionConfig(BaseModel):
@@ -90,7 +101,9 @@ class ContextAssemblyConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    default_max_tokens: int = Field(default=4000, ge=1, description="Default max tokens for context")
+    default_max_tokens: int = Field(
+        default=4000, ge=1, description="Default max tokens for context"
+    )
     priorities: dict[str, float] = Field(
         default_factory=dict, description="Memory type to priority percentage mapping"
     )
@@ -142,7 +155,9 @@ class WorkflowConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     max_steps_per_workflow: int = Field(default=1000, ge=1, description="Max steps per workflow")
-    auto_archive_completed: bool = Field(default=True, description="Auto-archive completed workflows")
+    auto_archive_completed: bool = Field(
+        default=True, description="Auto-archive completed workflows"
+    )
 
 
 class ToolboxConfig(BaseModel):
@@ -176,7 +191,9 @@ class FileMemoryConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     max_file_size_mb: int = Field(default=100, ge=1, description="Max file size in MB")
-    allowed_extensions: list[str] | None = Field(default=None, description="Allowed file extensions")
+    allowed_extensions: list[str] | None = Field(
+        default=None, description="Allowed file extensions"
+    )
 
 
 class PersonaConfig(BaseModel):
@@ -218,6 +235,35 @@ class MemharnessConfig(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO", description="Logging level"
     )
+
+    @property
+    def default_backend(self) -> str:
+        """Alias for backend field for backward compatibility."""
+        return self.backend
+
+    @property
+    def connection_string(self) -> str:
+        """Alias for backend field for backward compatibility."""
+        return self.backend
+
+    @classmethod
+    def from_yaml(cls, path):
+        """
+        Load configuration from a YAML file.
+
+        Args:
+            path: Path to the YAML configuration file.
+
+        Returns:
+            MemharnessConfig instance.
+
+        Example:
+            >>> config = MemharnessConfig.from_yaml("config.yaml")
+        """
+        # Import here to avoid circular dependency
+        from memharness.config.loader import from_yaml as loader_from_yaml
+
+        return loader_from_yaml(path)
 
 
 # Alias for backward compatibility

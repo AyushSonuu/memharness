@@ -88,27 +88,75 @@ class EntityExtractorAgent(EmbeddedAgent):
 
     # Patterns for deterministic extraction
     _PERSON_INDICATORS = [
-        "mr.", "mrs.", "ms.", "dr.", "prof.", "sir", "madam",
-        "ceo", "cto", "cfo", "founder", "director", "manager",
-        "said", "asked", "replied", "mentioned", "told",
+        "mr.",
+        "mrs.",
+        "ms.",
+        "dr.",
+        "prof.",
+        "sir",
+        "madam",
+        "ceo",
+        "cto",
+        "cfo",
+        "founder",
+        "director",
+        "manager",
+        "said",
+        "asked",
+        "replied",
+        "mentioned",
+        "told",
     ]
 
     _ORG_INDICATORS = [
-        "inc.", "corp.", "llc", "ltd.", "company", "corporation",
-        "organization", "institute", "university", "foundation",
-        "team", "department", "group", "agency",
+        "inc.",
+        "corp.",
+        "llc",
+        "ltd.",
+        "company",
+        "corporation",
+        "organization",
+        "institute",
+        "university",
+        "foundation",
+        "team",
+        "department",
+        "group",
+        "agency",
     ]
 
     _PLACE_INDICATORS = [
-        "city", "country", "state", "region", "district",
-        "street", "avenue", "road", "building", "headquarters",
-        "located in", "based in", "from", "at",
+        "city",
+        "country",
+        "state",
+        "region",
+        "district",
+        "street",
+        "avenue",
+        "road",
+        "building",
+        "headquarters",
+        "located in",
+        "based in",
+        "from",
+        "at",
     ]
 
     _CONCEPT_INDICATORS = [
-        "concept", "idea", "theory", "method", "approach",
-        "strategy", "technique", "framework", "model", "paradigm",
-        "algorithm", "process", "system", "architecture",
+        "concept",
+        "idea",
+        "theory",
+        "method",
+        "approach",
+        "strategy",
+        "technique",
+        "framework",
+        "model",
+        "paradigm",
+        "algorithm",
+        "process",
+        "system",
+        "architecture",
     ]
 
     def __init__(
@@ -279,9 +327,7 @@ Entities:"""
         except Exception:
             return self._extract_with_heuristics(text)
 
-    def _parse_llm_response(
-        self, response: str, original_text: str
-    ) -> list[ExtractedEntity]:
+    def _parse_llm_response(self, response: str, original_text: str) -> list[ExtractedEntity]:
         """Parse LLM response into entities."""
         entities: list[ExtractedEntity] = []
 
@@ -348,7 +394,19 @@ Entities:"""
             name = match.group(1)
 
             # Skip common words that are often capitalized
-            skip_words = {"The", "This", "That", "There", "Then", "They", "What", "When", "Where", "How", "Why"}
+            skip_words = {
+                "The",
+                "This",
+                "That",
+                "There",
+                "Then",
+                "They",
+                "What",
+                "When",
+                "Where",
+                "How",
+                "Why",
+            }
             if name in skip_words:
                 continue
 
@@ -463,9 +521,7 @@ Entities:"""
 
         return EntityType.UNKNOWN
 
-    def _calculate_confidence(
-        self, name: str, context: str, entity_type: EntityType
-    ) -> float:
+    def _calculate_confidence(self, name: str, context: str, entity_type: EntityType) -> float:
         """Calculate confidence score for extraction."""
         confidence = 0.5  # Base confidence
 
