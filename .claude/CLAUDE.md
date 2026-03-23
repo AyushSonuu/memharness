@@ -4,66 +4,62 @@
 memharness is a **framework-agnostic Python package** providing memory infrastructure for AI agents.
 - **Author**: Ayush Sonuu <sonuayush55@gmail.com>
 - **GitHub**: AyushSonuu/memharness (personal github.com account)
+- **PyPI**: https://pypi.org/project/memharness/
+- **Docs**: https://ayushsonuu.github.io/memharness/
 - **Python**: 3.13+ (use .venv in project root)
 - **Build**: hatchling
 - **License**: MIT
 
-## Research & Design
-Full research docs at ~/Desktop/my-memory/research/:
-- 09-HLD-memharness.md — the main HLD/spec (START HERE for design questions)
-- 00-project-brief.md through 12-ai-native-memory-agents.md — detailed research
-
 ## Commands
 ```bash
-# Run all tests
-.venv/bin/pytest tests/ -x --tb=short
-
-# Run specific test file
-.venv/bin/pytest tests/unit/test_types.py -v
-
-# Lint
-.venv/bin/ruff check src/ tests/ --fix
-
-# Format
-.venv/bin/ruff format src/ tests/
-
-# Type check
-.venv/bin/mypy src/memharness/
-
-# Install in dev mode
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pytest tests/ -x --tb=short      # Run tests
+.venv/bin/ruff check src/ tests/            # Lint
+.venv/bin/ruff format src/ tests/           # Format
+.venv/bin/python -m build                   # Build package
+docker compose up -d                        # Start postgres+pgvector
 ```
 
-## Architecture
+## Architecture (v0.3.0)
 ```
 src/memharness/
-├── __init__.py          # Public API exports
-├── harness.py           # MemoryHarness main class + InMemoryBackend + MemoryUnit (dataclass)
-├── types.py             # Pydantic MemoryUnit (NOT used by harness — legacy)
-├── registry.py          # MemoryTypeRegistry
-├── config/
-│   ├── models.py        # Pydantic config models
-│   └── loader.py        # YAML/env config loading
-├── backends/
-│   ├── protocol.py      # BackendProtocol
-│   ├── memory.py        # InMemoryBackend (separate module)
-│   ├── sqlite.py        # SqliteBackend
-│   └── postgres.py      # PostgresBackend
-├── agents/              # Embedded AI agents (summarizer, consolidator, gc, etc.)
-├── tools/               # Memory tools for agent self-exploration
-└── integrations/        # LangChain, LangGraph adapters
+├── types.py                 # MemoryType enum, MemoryUnit dataclass
+├── exceptions.py            # Custom exceptions
+├── core/
+│   ├── harness.py           # MemoryHarness (main class, delegates to memory_types/)
+│   ├── backend_factory.py   # _parse_backend()
+│   ├── config.py            # MemharnessConfig dataclass
+│   ├── context.py           # Context assembly
+│   └── embedding.py         # Default hash-based embedding
+├── memory_types/            # One module per memory type (10 types)
+├── backends/                # InMemory, SQLite, Postgres
+├── tools/                   # LangChain BaseTool subclasses
+├── integrations/            # LangChain, LangGraph adapters
+├── agents/                  # Memory agents (summarizer, consolidator, etc.)
+├── config/                  # Pydantic config models + YAML loader
+└── registry.py              # Memory type registry
 ```
 
-## KEY ARCHITECTURAL NOTE
-There are TWO MemoryUnit definitions:
-1. `harness.py` — dataclass-based, used by the actual MemoryHarness class (THE CANONICAL ONE)
-2. `types.py` — Pydantic-based, with different fields (namespace is str, has expires_at, score, source_ids)
+## Key Installed Packages (in .venv)
+- langchain 1.2.13 — `from langchain.agents import create_agent`
+- langchain-core 1.2.20 — `BaseTool`, `BaseChatMessageHistory`, `ChatPromptTemplate`
+- pydantic 2.12.5
+- aiosqlite 0.22.1
+- numpy 2.4.3
 
-Tests and the public API import from harness.py. The types.py Pydantic version is NOT actively used.
+## LangChain API Notes (IMPORTANT — explore before coding!)
+- `from langchain_core.tools import BaseTool, tool` — for tool definitions
+- `from langchain_core.chat_history import BaseChatMessageHistory` — NOT BaseMemory
+- `from langchain_core.prompts import ChatPromptTemplate` — for prompts
+- `from langchain_core.messages import HumanMessage, AIMessage, SystemMessage`
+- `from langchain.agents import create_agent` — NOT create_react_agent
+- BaseMemory is GONE from langchain-core (moved to langchain.memory or deprecated)
+- Always explore .venv packages before writing code: `.venv/bin/python -c "from X import Y; help(Y)"`
 
-## Code Style
-- Async-first API
-- Type hints everywhere
-- Docstrings on all public methods
-- ruff for linting/formatting
-- pytest-asyncio for async tests
+## Code Quality Rules
+- No file > 300 lines
+- Functions < 50 lines
+- Google-style docstrings
+- Type hints on everything
+- `from __future__ import annotations` in all files
+- ruff clean (check + format)
+- Test after every change
