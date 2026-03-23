@@ -11,7 +11,6 @@ All agents work WITHOUT an LLM (using deterministic fallbacks) but can
 leverage LLMs when provided for more intelligent operations.
 """
 
-from memharness.agents.agent_workflow import MemoryWorkflowMiddleware, create_after_workflow
 from memharness.agents.base import BaseMemoryAgent
 from memharness.agents.consolidator import ConsolidatorAgent
 from memharness.agents.context_assembler import AssembledContext, ContextAssemblyAgent
@@ -25,6 +24,4 @@ __all__ = [
     "ConsolidatorAgent",
     "AssembledContext",
     "ContextAssemblyAgent",
-    "MemoryWorkflowMiddleware",
-    "create_after_workflow",
 ]
