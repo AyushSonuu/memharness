@@ -269,6 +269,6 @@ extractor = EntityExtractionMiddleware(
 
 ## Next Steps
 
-- [Entity Extraction Guide](../concepts/entity-extraction) — Automated extraction
-- [Knowledge Graphs](../concepts/knowledge-graphs) — Building relationship graphs
+- [Entity Extraction Guide](../concepts/memory-lifecycle) — Automated extraction
+- [Knowledge Graphs](../concepts/memory-types) — Building relationship graphs
 - [Middleware Overview](../middleware/overview) — Entity extraction middleware

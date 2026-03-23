@@ -37,7 +37,6 @@ class MemoryTypeConfig:
         default_k: Default number of results for retrieval queries.
         supports_embedding: Whether this type uses vector embeddings.
         ordered: Whether temporal ordering is significant.
-        formatter: Optional function to format memories for LLM context.
 
     Example:
         >>> config = MemoryTypeConfig(
@@ -56,7 +55,6 @@ class MemoryTypeConfig:
     default_k: int = 10
     supports_embedding: bool = True
     ordered: bool = False
-    formatter: Callable[[list[MemoryUnit]], str] | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration consistency."""
@@ -100,8 +98,6 @@ class _DefaultHandler:
 
     def format(self, units: list[MemoryUnit]) -> str:
         """Format memories for LLM context."""
-        if self.config.formatter:
-            return self.config.formatter(units)
         return "\n".join(u.content for u in units)
 
 
@@ -174,7 +170,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["role", "thread_id"],
                 },
-                formatter=_format_conversational,
             )
         )
 
@@ -196,7 +191,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["tool_name", "status"],
                 },
-                formatter=_format_tool_log,
             )
         )
 
@@ -218,7 +212,6 @@ class MemoryTypeRegistry:
                         "document_id": {"type": "string"},
                     },
                 },
-                formatter=_format_knowledge_base,
             )
         )
 
@@ -249,7 +242,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["entity_name", "entity_type"],
                 },
-                formatter=_format_entity,
             )
         )
 
@@ -281,7 +273,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["workflow_name"],
                 },
-                formatter=_format_workflow,
             )
         )
 
@@ -304,7 +295,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["tool_name", "description"],
                 },
-                formatter=_format_toolbox,
             )
         )
 
@@ -329,7 +319,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["summary_type"],
                 },
-                formatter=_format_summary,
             )
         )
 
@@ -352,7 +341,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["skill_name", "capability"],
                 },
-                formatter=_format_skills,
             )
         )
 
@@ -376,7 +364,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["file_path"],
                 },
-                formatter=_format_file,
             )
         )
 
@@ -400,7 +387,6 @@ class MemoryTypeRegistry:
                     },
                     "required": ["persona_name"],
                 },
-                formatter=_format_persona,
             )
         )
 
@@ -603,112 +589,6 @@ class MemoryTypeRegistry:
     def __len__(self) -> int:
         """Return the number of registered memory types."""
         return len(self._configs)
-
-
-# Default formatters for LLM context
-
-
-def _format_conversational(units: list[MemoryUnit]) -> str:
-    """Format conversational memories as chat history."""
-    lines = []
-    for unit in sorted(units, key=lambda u: u.created_at):
-        role = unit.metadata.get("role", "unknown")
-        lines.append(f"[{role}]: {unit.content}")
-    return "\n".join(lines)
-
-
-def _format_tool_log(units: list[MemoryUnit]) -> str:
-    """Format tool logs as execution history."""
-    lines = ["## Tool Execution Log"]
-    for unit in sorted(units, key=lambda u: u.created_at):
-        tool_name = unit.metadata.get("tool_name", "unknown")
-        status = unit.metadata.get("status", "unknown")
-        lines.append(f"- {tool_name}: {status} - {unit.content[:100]}")
-    return "\n".join(lines)
-
-
-def _format_knowledge_base(units: list[MemoryUnit]) -> str:
-    """Format knowledge base entries as reference material."""
-    lines = ["## Relevant Knowledge"]
-    for i, unit in enumerate(units, 1):
-        source = unit.metadata.get("source", "unknown")
-        score = f" (relevance: {unit.score:.2f})" if unit.score else ""
-        lines.append(f"[{i}] {source}{score}")
-        lines.append(unit.content)
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _format_entity(units: list[MemoryUnit]) -> str:
-    """Format entity memories as structured information."""
-    lines = ["## Known Entities"]
-    for unit in units:
-        name = unit.metadata.get("entity_name", "Unknown")
-        etype = unit.metadata.get("entity_type", "entity")
-        lines.append(f"- **{name}** ({etype}): {unit.content}")
-    return "\n".join(lines)
-
-
-def _format_workflow(units: list[MemoryUnit]) -> str:
-    """Format workflow memories as procedures."""
-    lines = ["## Available Workflows"]
-    for unit in units:
-        name = unit.metadata.get("workflow_name", "Unnamed")
-        lines.append(f"### {name}")
-        lines.append(unit.content)
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _format_toolbox(units: list[MemoryUnit]) -> str:
-    """Format toolbox entries as available tools."""
-    lines = ["## Available Tools"]
-    for unit in units:
-        name = unit.metadata.get("tool_name", "unknown")
-        desc = unit.metadata.get("description", "")
-        lines.append(f"- **{name}**: {desc}")
-        lines.append(f"  {unit.content[:200]}")
-    return "\n".join(lines)
-
-
-def _format_summary(units: list[MemoryUnit]) -> str:
-    """Format summaries as condensed context."""
-    lines = ["## Context Summaries"]
-    for unit in units:
-        stype = unit.metadata.get("summary_type", "general")
-        lines.append(f"### {stype.title()} Summary")
-        lines.append(unit.content)
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _format_skills(units: list[MemoryUnit]) -> str:
-    """Format skills as learned capabilities."""
-    lines = ["## Learned Skills"]
-    for unit in units:
-        name = unit.metadata.get("skill_name", "unknown")
-        lines.append(f"- **{name}**: {unit.content}")
-    return "\n".join(lines)
-
-
-def _format_file(units: list[MemoryUnit]) -> str:
-    """Format file memories as file references."""
-    lines = ["## File Contents"]
-    for unit in units:
-        path = unit.metadata.get("file_path", "unknown")
-        lines.append(f"### {path}")
-        lines.append(unit.content)
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _format_persona(units: list[MemoryUnit]) -> str:
-    """Format persona entries as identity guidelines."""
-    lines = ["## Agent Persona"]
-    for unit in units:
-        trait = unit.metadata.get("trait_type", "general")
-        lines.append(f"- [{trait}] {unit.content}")
-    return "\n".join(lines)
 
 
 # Module-level default registry instance
