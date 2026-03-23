@@ -701,3 +701,36 @@ def get_memory_tools(harness: MemoryHarness) -> list[BaseTool]:
         AssembleContextTool(harness=harness),
         SummarizeAndStoreTool(harness=harness),
     ]
+
+
+def get_read_tools(harness: MemoryHarness) -> list[BaseTool]:
+    """Get read-only memory tools for external agents.
+
+    These tools let an agent SEARCH and READ memory but NOT write.
+    Writes are handled by middleware (BEFORE/AFTER the agent call).
+
+    Args:
+        harness: The MemoryHarness instance.
+
+    Returns:
+        List of 5 read-only BaseTool instances:
+        1. memory_search - Search across memory types
+        2. memory_read - Read memory by ID
+        3. expand_summary - Expand compacted summaries
+        4. assemble_context - Full context assembly
+        5. toolbox_search - Discover tools
+
+    Example:
+        >>> tools = get_read_tools(harness)
+        >>> agent = create_agent(model=..., tools=tools, middleware=[...])
+    """
+    if not LANGCHAIN_AVAILABLE:
+        raise ImportError("langchain-core is required. Install: pip install langchain-core")
+
+    return [
+        MemorySearchTool(harness=harness),
+        MemoryReadTool(harness=harness),
+        ExpandSummaryTool(harness=harness),
+        AssembleContextTool(harness=harness),
+        ToolboxSearchTool(harness=harness),
+    ]
