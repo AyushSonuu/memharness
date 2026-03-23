@@ -6,329 +6,148 @@
 
 from __future__ import annotations
 
-import copy
-import math
-from collections import defaultdict
+from datetime import UTC, datetime
+from typing import Any
+
+from memharness.types import MemoryType, MemoryUnit
 
 
 class InMemoryBackend:
-    """In-memory storage backend for testing and development.
+    """
+    Simple in-memory backend for development and testing.
 
-    This backend stores all data in memory using Python dictionaries.
-    Data is lost when the process exits. Useful for:
-    - Unit testing
-    - Development and prototyping
-    - Temporary storage needs
-
-    Example:
-        backend = InMemoryBackend()
-        await backend.connect()
-        await backend.write(("kb",), "key1", {"content": "hello"})
-        result = await backend.read(("kb",), "key1")
+    This backend stores all data in memory and is lost when the process ends.
+    It provides basic similarity search using cosine similarity.
     """
 
     def __init__(self) -> None:
-        """Initialize the in-memory backend."""
-        self._storage: dict[tuple[str, ...], dict[str, dict]] = defaultdict(dict)
-        self._embeddings: dict[tuple[str, ...], dict[str, list[float]]] = defaultdict(dict)
+        self._storage: dict[str, MemoryUnit] = {}
         self._connected: bool = False
 
     async def connect(self) -> None:
-        """Initialize the backend (no-op for in-memory)."""
+        """Mark the backend as connected."""
         self._connected = True
 
     async def disconnect(self) -> None:
-        """Clear storage and mark as disconnected."""
-        self._storage.clear()
-        self._embeddings.clear()
+        """Mark the backend as disconnected."""
         self._connected = False
 
-    async def write(
-        self,
-        namespace: tuple[str, ...],
-        key: str,
-        value: dict,
-        embedding: list[float] | None = None,
-    ) -> str:
-        """Write a memory to storage.
+    async def store(self, unit: MemoryUnit) -> str:
+        """Store a memory unit in memory."""
+        self._storage[unit.id] = unit
+        return unit.id
 
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier within the namespace
-            value: Memory data as a dictionary
-            embedding: Optional embedding vector
-
-        Returns:
-            The key of the written memory
-        """
-        # Deep copy to prevent external mutations
-        self._storage[namespace][key] = copy.deepcopy(value)
-
-        if embedding is not None:
-            self._embeddings[namespace][key] = embedding.copy()
-
-        return key
-
-    async def read(self, namespace: tuple[str, ...], key: str) -> dict | None:
-        """Read a single memory by key.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier within the namespace
-
-        Returns:
-            Memory data dictionary if found, None otherwise
-        """
-        value = self._storage.get(namespace, {}).get(key)
-        return copy.deepcopy(value) if value is not None else None
+    async def get(self, memory_id: str) -> MemoryUnit | None:
+        """Retrieve a memory unit by ID."""
+        return self._storage.get(memory_id)
 
     async def search(
         self,
-        namespace: tuple[str, ...],
-        query: str,
-        embedding: list[float] | None = None,
+        query_embedding: list[float],
+        memory_type: MemoryType | None = None,
+        namespace: tuple[str, ...] | None = None,
+        filters: dict[str, Any] | None = None,
         k: int = 10,
-        filters: dict | None = None,
-    ) -> list[dict]:
-        """Search memories using text query or embedding similarity.
+    ) -> list[MemoryUnit]:
+        """Search for memory units using cosine similarity."""
+        candidates = []
 
-        For in-memory backend:
-        - If embedding provided, uses cosine similarity
-        - Otherwise, does simple text matching on string values
+        for unit in self._storage.values():
+            # Filter by memory type
+            if memory_type and unit.memory_type != memory_type:
+                continue
 
-        Args:
-            namespace: Hierarchical namespace tuple
-            query: Text query for search
-            embedding: Optional embedding vector for semantic search
-            k: Maximum number of results
-            filters: Optional filters to apply
+            # Filter by namespace prefix
+            if namespace and not self._namespace_matches(unit.namespace, namespace):
+                continue
 
-        Returns:
-            List of matching memories ordered by relevance
-        """
-        memories = self._storage.get(namespace, {})
+            # Apply metadata filters
+            if filters and not self._matches_filters(unit.metadata, filters):
+                continue
 
-        if not memories:
-            return []
+            # Calculate similarity if embeddings exist
+            if unit.embedding and query_embedding:
+                similarity = self._cosine_similarity(query_embedding, unit.embedding)
+                candidates.append((similarity, unit))
+            else:
+                # No embedding, use 0 similarity but still include
+                candidates.append((0.0, unit))
 
-        # Apply filters first
-        filtered = {}
-        for key, value in memories.items():
-            if filters:
-                if not self._matches_filters(value, filters):
-                    continue
-            filtered[key] = value
+        # Sort by similarity descending and return top k
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return [unit for _, unit in candidates[:k]]
 
-        if not filtered:
-            return []
-
-        # If embedding provided, use vector similarity
-        if embedding is not None:
-            ns_embeddings = self._embeddings.get(namespace, {})
-            scored = []
-
-            for key, value in filtered.items():
-                stored_embedding = ns_embeddings.get(key)
-                if stored_embedding:
-                    score = self._cosine_similarity(embedding, stored_embedding)
-                    scored.append((score, key, value))
-                else:
-                    # No embedding, lowest score
-                    scored.append((0.0, key, value))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return [copy.deepcopy(item[2]) for item in scored[:k]]
-
-        # Text-based search: simple substring matching
-        query_lower = query.lower()
-        scored = []
-
-        for key, value in filtered.items():
-            score = self._text_match_score(value, query_lower)
-            if score > 0:
-                scored.append((score, key, value))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [copy.deepcopy(item[2]) for item in scored[:k]]
-
-    async def list(
-        self,
-        namespace: tuple[str, ...],
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int | None = None,
-    ) -> list[dict]:
-        """List memories with optional filtering and ordering.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            filters: Optional filters to apply
-            order_by: Field to order by (prefix with - for descending)
-            limit: Maximum number of results
-
-        Returns:
-            List of memory dictionaries
-        """
-        memories = self._storage.get(namespace, {})
-
-        if not memories:
-            return []
-
-        # Apply filters
-        results = []
-        for value in memories.values():
-            if filters:
-                if not self._matches_filters(value, filters):
-                    continue
-            results.append(copy.deepcopy(value))
-
-        # Apply ordering
-        if order_by:
-            descending = order_by.startswith("-")
-            field = order_by[1:] if descending else order_by
-
-            results.sort(key=lambda x: x.get(field, ""), reverse=descending)
-
-        # Apply limit
-        if limit is not None:
-            results = results[:limit]
-
-        return results
-
-    async def delete(self, namespace: tuple[str, ...], key: str) -> bool:
-        """Delete a memory by key.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier
-
-        Returns:
-            True if deleted, False if not found
-        """
-        if namespace in self._storage and key in self._storage[namespace]:
-            del self._storage[namespace][key]
-
-            # Also remove embedding if present
-            if namespace in self._embeddings and key in self._embeddings[namespace]:
-                del self._embeddings[namespace][key]
-
-            return True
-
-        return False
-
-    async def update(
-        self,
-        namespace: tuple[str, ...],
-        key: str,
-        value: dict,
-        embedding: list[float] | None = None,
-    ) -> bool:
-        """Update an existing memory.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-            key: Unique identifier
-            value: New data to merge
-            embedding: Optional new embedding
-
-        Returns:
-            True if updated, False if not found
-        """
-        if namespace not in self._storage or key not in self._storage[namespace]:
+    async def update(self, memory_id: str, updates: dict[str, Any]) -> bool:
+        """Update a memory unit."""
+        if memory_id not in self._storage:
             return False
 
-        # Merge with existing data
-        existing = self._storage[namespace][key]
-        existing.update(copy.deepcopy(value))
+        unit = self._storage[memory_id]
 
-        if embedding is not None:
-            self._embeddings[namespace][key] = embedding.copy()
+        if "content" in updates:
+            unit.content = updates["content"]
+        if "metadata" in updates:
+            unit.metadata.update(updates["metadata"])
+        if "embedding" in updates:
+            unit.embedding = updates["embedding"]
 
+        unit.updated_at = datetime.now(UTC)
         return True
 
-    def _matches_filters(self, value: dict, filters: dict) -> bool:
-        """Check if a value matches all filters.
+    async def delete(self, memory_id: str) -> bool:
+        """Delete a memory unit."""
+        if memory_id in self._storage:
+            del self._storage[memory_id]
+            return True
+        return False
 
-        Args:
-            value: Memory data
-            filters: Filter criteria
+    async def list_by_namespace(
+        self,
+        namespace: tuple[str, ...],
+        memory_type: MemoryType | None = None,
+        limit: int = 100,
+    ) -> list[MemoryUnit]:
+        """List memory units by namespace prefix."""
+        results = []
 
-        Returns:
-            True if all filters match
-        """
-        for filter_key, filter_value in filters.items():
-            if filter_key not in value:
+        for unit in self._storage.values():
+            if not self._namespace_matches(unit.namespace, namespace):
+                continue
+            if memory_type and unit.memory_type != memory_type:
+                continue
+            results.append(unit)
+            if len(results) >= limit:
+                break
+
+        # Sort by created_at descending
+        results.sort(key=lambda u: u.created_at, reverse=True)
+        return results[:limit]
+
+    def _namespace_matches(self, unit_ns: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+        """Check if a namespace starts with the given prefix."""
+        if len(prefix) > len(unit_ns):
+            return False
+        return unit_ns[: len(prefix)] == prefix
+
+    def _matches_filters(self, metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
+        """Check if metadata matches all filters."""
+        for key, value in filters.items():
+            if key not in metadata:
                 return False
-            if value[filter_key] != filter_value:
+            if metadata[key] != value:
                 return False
         return True
 
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity score between -1 and 1
-        """
-        if len(vec1) != len(vec2):
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        """Calculate cosine similarity between two vectors."""
+        if len(a) != len(b):
             return 0.0
 
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=False))
-        norm1 = math.sqrt(sum(a * a for a in vec1))
-        norm2 = math.sqrt(sum(b * b for b in vec2))
+        dot_product = sum(x * y for x, y in zip(a, b, strict=False))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
 
-        if norm1 == 0 or norm2 == 0:
+        if norm_a == 0 or norm_b == 0:
             return 0.0
 
-        return dot_product / (norm1 * norm2)
-
-    def _text_match_score(self, value: dict, query: str) -> float:
-        """Calculate text match score for a memory.
-
-        Simple scoring: counts how many times query appears in string values.
-
-        Args:
-            value: Memory data
-            query: Lowercase query string
-
-        Returns:
-            Match score (higher is better)
-        """
-        score = 0.0
-
-        for v in value.values():
-            if isinstance(v, str):
-                text = v.lower()
-                if query in text:
-                    score += text.count(query)
-
-        return score
-
-    # Utility methods for testing
-
-    def clear(self) -> None:
-        """Clear all stored data without disconnecting."""
-        self._storage.clear()
-        self._embeddings.clear()
-
-    def get_namespace_count(self, namespace: tuple[str, ...]) -> int:
-        """Get count of memories in a namespace.
-
-        Args:
-            namespace: Hierarchical namespace tuple
-
-        Returns:
-            Number of memories in namespace
-        """
-        return len(self._storage.get(namespace, {}))
-
-    def get_all_namespaces(self) -> list[tuple[str, ...]]:
-        """Get all namespaces with data.
-
-        Returns:
-            List of namespace tuples
-        """
-        return list(self._storage.keys())
+        return dot_product / (norm_a * norm_b)
