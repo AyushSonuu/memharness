@@ -3,32 +3,25 @@
 # Licensed under MIT License
 
 """
-Embedded agents for intelligent memory management.
+Memory agents for intelligent memory management.
 
-This module provides AI agents that run embedded within the memory system
-to perform automatic maintenance, summarization, entity extraction, and more.
+This module provides AI agents that perform automatic maintenance,
+summarization, entity extraction, consolidation, and garbage collection.
 
 All agents work WITHOUT an LLM (using deterministic fallbacks) but can
 leverage LLMs when provided for more intelligent operations.
 """
 
-from memharness.agents.base import AgentConfig, EmbeddedAgent, TriggerType
+from memharness.agents.base import BaseMemoryAgent
 from memharness.agents.consolidator import ConsolidatorAgent
 from memharness.agents.entity_extractor import EntityExtractorAgent
 from memharness.agents.gc import GCAgent
-from memharness.agents.scheduler import AgentScheduler
 from memharness.agents.summarizer import SummarizerAgent
 
 __all__ = [
-    # Base classes
-    "EmbeddedAgent",
-    "TriggerType",
-    "AgentConfig",
-    # Agents
+    "BaseMemoryAgent",
     "SummarizerAgent",
     "EntityExtractorAgent",
     "ConsolidatorAgent",
     "GCAgent",
-    # Scheduler
-    "AgentScheduler",
 ]
