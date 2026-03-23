@@ -626,26 +626,23 @@ class SummarizeAndStoreTool(BaseTool):
         try:
             from memharness.agents.summarizer import SummarizerAgent
 
-            # Get messages to summarize
-            messages = await self.harness.get_conversational(thread_id, limit=max_messages)
-            if not messages:
-                return f"No messages found in thread {thread_id}"
-
             # Create summarizer agent (heuristic mode, no LLM required)
             summarizer = SummarizerAgent(self.harness, llm=None)
-            summary_text = await summarizer.summarize_thread(thread_id, max_messages)
+            result = await summarizer.summarize_thread(thread_id, max_messages)
 
-            # Store summary with source message IDs
-            source_ids = [msg.id for msg in messages]
-            summary_id = await self.harness.add_summary(
-                summary=summary_text, source_ids=source_ids, thread_id=thread_id
-            )
+            # Handle the result dict (new API)
+            if not result.get("summarized"):
+                reason = result.get("reason", "unknown")
+                if reason == "too_few_messages":
+                    return f"Not enough messages to summarize in thread {thread_id} ({result.get('messages_summarized', 0)} messages found, need at least 10)"
+                return f"Could not summarize: {reason}"
 
+            # Success - return formatted message
             return (
                 f"Summary created and stored.\n"
-                f"Summary ID: {summary_id}\n"
-                f"Summarized {len(messages)} message(s).\n\n"
-                f"Summary: {summary_text}"
+                f"Summary ID: {result['summary_id']}\n"
+                f"Summarized {result['messages_summarized']} message(s).\n\n"
+                f"Summary: {result['summary_text']}"
             )
         except Exception as e:
             return f"Error creating summary: {e}"

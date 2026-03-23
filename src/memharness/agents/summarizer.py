@@ -47,25 +47,71 @@ class SummarizerAgent:
         self.harness = harness
         self.llm = llm
 
-    async def summarize_thread(self, thread_id: str, max_messages: int = 50) -> str:
+    async def summarize_thread(self, thread_id: str, max_messages: int = 50) -> dict[str, Any]:
         """
-        Summarize a conversation thread.
+        Summarize a conversation thread and mark source messages.
+
+        This method implements the full summarization pipeline from L05:
+        1. Get unsummarized messages for the thread
+        2. Create summary (heuristic or LLM)
+        3. Store summary via harness.add_summary()
+        4. Mark original messages with summary_id in their metadata
+        5. Return summarization result with summary_id
 
         Args:
             thread_id: The thread ID to summarize.
             max_messages: Maximum number of recent messages to include.
 
         Returns:
-            A summary string.
+            Dictionary with:
+            - 'summarized': bool indicating if summarization occurred
+            - 'summary_id': str ID of the created summary (if summarized)
+            - 'summary_text': str summary text (if summarized)
+            - 'messages_summarized': int count of messages processed
+            - 'reason': str explanation if not summarized
+
+        Example:
+            ```python
+            result = await summarizer.summarize_thread("chat-123", max_messages=50)
+            if result['summarized']:
+                print(f"Summarized {result['messages_summarized']} messages")
+                print(f"Summary ID: {result['summary_id']}")
+            ```
         """
+        # 1. Get unsummarized messages
         messages = await self.harness.get_conversational(thread_id, limit=max_messages)
-        if not messages:
-            return ""
 
+        if len(messages) < 10:
+            return {
+                "summarized": False,
+                "reason": "too_few_messages",
+                "messages_summarized": len(messages),
+            }
+
+        # 2. Create summary text
         if not self.llm:
-            return self._heuristic_summary(messages)
+            summary_text = self._heuristic_summary(messages)
+        else:
+            summary_text = await self._llm_summary(messages)
 
-        return await self._llm_summary(messages)
+        # 3. Store summary via harness.add_summary()
+        source_ids = [m.id for m in messages]
+        summary_id = await self.harness.add_summary(
+            summary=summary_text, source_ids=source_ids, thread_id=thread_id
+        )
+
+        # 4. Mark original messages with summary_id
+        for msg in messages:
+            msg.metadata["summary_id"] = summary_id
+            await self.harness._backend.update(msg.id, {"metadata": msg.metadata})
+
+        # 5. Return result
+        return {
+            "summarized": True,
+            "summary_id": summary_id,
+            "summary_text": summary_text,
+            "messages_summarized": len(messages),
+        }
 
     def _heuristic_summary(self, messages: list[Any]) -> str:
         """
@@ -138,9 +184,6 @@ class SummarizerAgent:
             **kwargs: Additional arguments (ignored).
 
         Returns:
-            Dictionary with 'summary' and 'message_count' keys.
+            Dictionary with summarization results (see summarize_thread docstring).
         """
-        messages = await self.harness.get_conversational(thread_id, limit=max_messages)
-        summary = await self.summarize_thread(thread_id, max_messages)
-
-        return {"summary": summary, "message_count": len(messages)}
+        return await self.summarize_thread(thread_id, max_messages)

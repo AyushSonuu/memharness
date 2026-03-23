@@ -100,6 +100,15 @@ class AssembledContext:
                 messages.append({"role": "system", "content": system_content})
 
         # 2. Conversation history as proper message objects
+        # First, render summaries as SystemMessage (if any)
+        if self.summaries:
+            summary_content = f"[Summary of earlier conversation]\n{self.summaries}"
+            if use_langchain:
+                messages.append(SystemMessage(content=summary_content))
+            else:
+                messages.append({"role": "system", "content": summary_content})
+
+        # Then, append recent unsummarized messages
         for mem in self.conversation_history:
             role = mem.metadata.get("role", "user") if hasattr(mem, "metadata") else "user"
             content = mem.content if hasattr(mem, "content") else str(mem)
@@ -252,7 +261,13 @@ class ContextAssemblyAgent:
         if persona:
             ctx.persona = persona.content
 
-        # Conversation history (raw MemoryUnits — converted to messages by to_messages())
+        # Summaries for this thread (load first, chronological order)
+        summaries = await self.harness.get_summaries_by_thread(thread_id)
+        if summaries:
+            ctx.summaries = "\n\n".join(f"[Summary ID: {s.id}] {s.content}" for s in summaries)
+
+        # Conversation history (unsummarized messages only, after summaries)
+        # get_conversational() now filters out messages with summary_id set
         messages = await self.harness.get_conversational(thread_id, limit=20)
         if messages:
             ctx.conversation_history = list(messages)
