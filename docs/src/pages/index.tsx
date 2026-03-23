@@ -74,12 +74,13 @@ const FeatureList: FeatureItem[] = [
     ),
   },
   {
-    title: '3 Read-Only Tools',
+    title: '5 Read-Only Tools',
     emoji: '🔍',
     description: (
       <>
-        Read-only toolkit: search across all memory types, read specific memories,
-        and assemble optimal context for LLM calls.
+        Search memory, read by ID, expand summaries, assemble context,
+        and discover tools — all as LangChain BaseTool subclasses.
+        Middleware handles writes.
       </>
     ),
   },
@@ -178,7 +179,7 @@ function QuickStart() {
               🤖 Use with LangChain Agent
             </Heading>
             <p className="text--center" style={{color: 'var(--ifm-color-secondary-darkest)', marginBottom: '1rem'}}>
-              Give any agent persistent, searchable memory with 3 read-only tools
+              Give any agent persistent, searchable memory with 5 read-only tools
             </p>
             <CodeBlock language="python" title="langchain_agent.py" showLineNumbers>
               {agentExample}
@@ -207,7 +208,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="Memory Infrastructure for AI Agents"
-      description="Framework-agnostic memory infrastructure for AI agents. 8 memory types, pluggable backends, 3 read-only tools.">
+      description="Framework-agnostic memory infrastructure for AI agents. 8 memory types, pluggable backends, 5 read-only tools.">
       <HomepageHeader />
       <main>
         <section className={styles.features}>

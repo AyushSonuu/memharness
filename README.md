@@ -66,14 +66,16 @@ Give any agent read-only access to its memory:
 ```python
 from memharness.tools import get_read_tools
 
-tools = get_read_tools(harness)  # Returns 3 LangChain BaseTool instances
+tools = get_read_tools(harness)  # Returns 5 LangChain BaseTool instances
 ```
 
 | Tool | What the agent can do |
 |------|-----------------------|
 | `memory_search` | Search across all memory types |
 | `memory_read` | Read a specific memory by ID |
+| `expand_summary` | Expand a compacted summary to full content |
 | `assemble_context` | Full context assembly (BEFORE-loop) |
+| `toolbox_search` | Discover available tools |
 
 ## Embedded Agents
 

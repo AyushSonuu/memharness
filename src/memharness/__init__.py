@@ -24,7 +24,7 @@ from memharness.core.harness import MemoryHarness
 from memharness.registry import MemoryTypeRegistry
 from memharness.types import MemoryType, MemoryUnit
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 __author__ = "Ayush Sonuu"
 __license__ = "MIT"
 
