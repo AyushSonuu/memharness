@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import logging
 import math
@@ -55,41 +56,25 @@ class SqliteBackend:
         await self._connection.execute("PRAGMA journal_mode=WAL")
         await self._connection.execute("PRAGMA foreign_keys=ON")
 
-        # Create main memories table
-        await self._connection.execute("""
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                memory_type TEXT NOT NULL,
-                namespace TEXT NOT NULL,
-                embedding TEXT,
-                metadata TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                thread_id TEXT,
-                parent_id TEXT
-            )
-        """)
+        # Load and execute schema from SQL file
+        try:
+            # Use importlib.resources to load schema.sql from package
+            if hasattr(importlib.resources, "files"):
+                # Python 3.9+
+                schema_path = importlib.resources.files("memharness.sql.sqlite") / "schema.sql"
+                schema_sql = schema_path.read_text()
+            else:
+                # Python 3.8 fallback
+                import importlib.resources as pkg_resources
 
-        # Create indexes
-        await self._connection.execute("""
-            CREATE INDEX IF NOT EXISTS idx_memory_type
-            ON memories(memory_type)
-        """)
+                schema_sql = pkg_resources.read_text("memharness.sql.sqlite", "schema.sql")
 
-        await self._connection.execute("""
-            CREATE INDEX IF NOT EXISTS idx_namespace
-            ON memories(namespace)
-        """)
-
-        await self._connection.execute("""
-            CREATE INDEX IF NOT EXISTS idx_created_at
-            ON memories(created_at)
-        """)
-
-        await self._connection.commit()
-
-        logger.info(f"Connected to SQLite database: {self._db_path}")
+            await self._connection.executescript(schema_sql)
+            await self._connection.commit()
+            logger.info(f"Connected to SQLite database: {self._db_path}")
+        except Exception as e:
+            logger.error(f"Failed to load schema: {e}")
+            raise
 
     async def disconnect(self) -> None:
         """Close connection to the backend storage."""
